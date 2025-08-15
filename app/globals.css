@@ -132,23 +132,55 @@
     @apply bg-background text-foreground;
   }
 
-  /* 添加优化的滚动条样式 */
+  /* 添加移动端优化样式 */
+  /* 安全区域支持 */
+  .safe-area-inset-top {
+    padding-top: env(safe-area-inset-top);
+  }
+
+  .safe-area-inset-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  /* 触摸优化 */
+  .touch-manipulation {
+    touch-action: manipulation;
+  }
+
+  /* 移动端滚动优化 */
+  @media (max-width: 768px) {
+    body {
+      -webkit-overflow-scrolling: touch;
+      overscroll-behavior-y: contain;
+    }
+  }
+
+  /* 优化的滚动条样式 */
   ::-webkit-scrollbar {
-    width: 8px;
+    width: 6px;
   }
 
   ::-webkit-scrollbar-track {
     background: rgba(241, 198, 209, 0.1);
-    border-radius: 4px;
+    border-radius: 3px;
   }
 
   ::-webkit-scrollbar-thumb {
     background: rgba(241, 198, 209, 0.5);
-    border-radius: 4px;
+    border-radius: 3px;
   }
 
   ::-webkit-scrollbar-thumb:hover {
     background: rgba(241, 198, 209, 0.7);
+  }
+
+  /* 移动端输入框优化 */
+  @media (max-width: 768px) {
+    input,
+    textarea,
+    select {
+      font-size: 16px; /* 防止iOS缩放 */
+    }
   }
 }
 
@@ -191,9 +223,9 @@
     }
   }
 
-  /* 添加玻璃质感样式类 */
+  /* 优化移动端玻璃质感样式 */
   .glass-button {
-    @apply bg-white/20 backdrop-blur-md border border-white/30 hover:bg-white/30 transition-all duration-300 shadow-lg hover:shadow-xl;
+    @apply bg-white/20 backdrop-blur-md border border-white/30 hover:bg-white/30 transition-all duration-300 shadow-lg hover:shadow-xl touch-manipulation;
   }
 
   .glass-card {
@@ -201,10 +233,26 @@
   }
 
   .glass-pink {
-    @apply bg-pink-500 backdrop-blur-md border border-pink-300 hover:bg-pink-600 text-white shadow-lg hover:shadow-xl;
+    @apply bg-pink-500 backdrop-blur-md border border-pink-300 hover:bg-pink-600 text-white shadow-lg hover:shadow-xl touch-manipulation;
   }
 
   .glass-pink-disabled {
     @apply bg-gray-300/50 backdrop-blur-md border border-gray-300/40 text-gray-500 cursor-not-allowed;
+  }
+
+  /* 移动端特定优化 */
+  @media (max-width: 768px) {
+    .mobile-optimized {
+      @apply text-base leading-relaxed;
+    }
+
+    .mobile-touch-target {
+      min-height: 44px;
+      min-width: 44px;
+    }
+
+    .mobile-spacing {
+      @apply px-4 py-3;
+    }
   }
 }

@@ -22,8 +22,6 @@ export default function Navigation() {
   const { user, logout } = useAuth()
   const router = useRouter()
 
-  // PhotoManager now uses supabase.auth.getUser() directly for authentication
-
   const handleLogout = () => {
     logout()
     photoManager.clearPhotos()
@@ -42,26 +40,26 @@ export default function Navigation() {
 
   return (
     <>
-      <nav className="fixed top-0 left-0 right-0 z-50 bg-white/80 backdrop-blur-md border-b border-pink-100">
+      <nav className="fixed top-0 left-0 right-0 z-50 bg-white/90 backdrop-blur-md border-b border-pink-100 safe-area-inset-top">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center h-16">
+          <div className="flex justify-between items-center h-14 sm:h-16">
             {/* Logo */}
-            <Link href="/" className="flex items-center space-x-2">
-              <Heart className="w-6 h-6 text-pink-400" />
-              <span className="font-serif font-bold text-xl text-gray-800">
+            <Link href="/" className="flex items-center space-x-2 min-w-0 flex-1">
+              <Heart className="w-5 h-5 sm:w-6 sm:h-6 text-pink-400 flex-shrink-0" />
+              <span className="font-serif font-bold text-lg sm:text-xl text-gray-800 truncate">
                 {user ? `${user.displayName}'s Gallery` : "Heart's Gallery"}
               </span>
             </Link>
 
             {/* Desktop Navigation */}
-            <div className="hidden md:flex items-center space-x-8">
+            <div className="hidden md:flex items-center space-x-6 lg:space-x-8">
               {navItems.map((item) => {
                 const Icon = item.icon
                 return (
                   <Link
                     key={item.href}
                     href={item.href}
-                    className="flex items-center space-x-1 text-gray-600 hover:text-pink-500 transition-colors duration-200 group"
+                    className="flex items-center space-x-1 text-gray-600 hover:text-pink-500 transition-colors duration-200 group py-2"
                   >
                     <Icon className="w-4 h-4 group-hover:scale-110 transition-transform duration-200" />
                     <span className="font-sans text-sm">{item.label}</span>
@@ -72,9 +70,12 @@ export default function Navigation() {
               {user && (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" className="flex items-center space-x-2 text-gray-600 hover:text-pink-500">
+                    <Button
+                      variant="ghost"
+                      className="flex items-center space-x-2 text-gray-600 hover:text-pink-500 py-2"
+                    >
                       <User className="w-4 h-4" />
-                      <span className="font-sans text-sm">{user.displayName}</span>
+                      <span className="font-sans text-sm max-w-24 truncate">{user.displayName}</span>
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end" className="w-48">
@@ -95,29 +96,34 @@ export default function Navigation() {
             {/* Mobile menu button */}
             <button
               onClick={() => setIsOpen(!isOpen)}
-              className="md:hidden p-2 rounded-md text-gray-600 hover:text-pink-500 hover:bg-pink-50 transition-colors duration-200"
+              className="md:hidden p-3 -mr-3 rounded-lg text-gray-600 hover:text-pink-500 hover:bg-pink-50 transition-colors duration-200 touch-manipulation"
+              aria-label="Toggle menu"
             >
               <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                {isOpen ? (
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                ) : (
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                )}
               </svg>
             </button>
           </div>
 
           {/* Mobile Navigation */}
           {isOpen && (
-            <div className="md:hidden py-4 border-t border-pink-100">
-              <div className="flex flex-col space-y-3">
+            <div className="md:hidden py-3 border-t border-pink-100 bg-white/95 backdrop-blur-sm">
+              <div className="flex flex-col space-y-1">
                 {navItems.map((item) => {
                   const Icon = item.icon
                   return (
                     <Link
                       key={item.href}
                       href={item.href}
-                      className="flex items-center space-x-2 px-3 py-2 text-gray-600 hover:text-pink-500 hover:bg-pink-50 rounded-md transition-colors duration-200"
+                      className="flex items-center space-x-3 px-4 py-3 text-gray-600 hover:text-pink-500 hover:bg-pink-50 rounded-lg transition-colors duration-200 touch-manipulation"
                       onClick={() => setIsOpen(false)}
                     >
-                      <Icon className="w-4 h-4" />
-                      <span className="font-sans">{item.label}</span>
+                      <Icon className="w-5 h-5 flex-shrink-0" />
+                      <span className="font-sans text-base">{item.label}</span>
                     </Link>
                   )
                 })}
@@ -125,20 +131,26 @@ export default function Navigation() {
                 {user && (
                   <>
                     <div className="border-t border-pink-100 pt-3 mt-3">
-                      <div className="px-3 py-2 text-sm text-gray-500">Signed in as {user.displayName}</div>
+                      <div className="px-4 py-2 text-sm text-gray-500 font-medium">Signed in as {user.displayName}</div>
                       <button
-                        onClick={() => setShowShareModal(true)}
-                        className="flex items-center space-x-2 px-3 py-2 w-full text-left text-gray-600 hover:text-pink-500 hover:bg-pink-50 rounded-md transition-colors duration-200"
+                        onClick={() => {
+                          setShowShareModal(true)
+                          setIsOpen(false)
+                        }}
+                        className="flex items-center space-x-3 px-4 py-3 w-full text-left text-gray-600 hover:text-pink-500 hover:bg-pink-50 rounded-lg transition-colors duration-200 touch-manipulation"
                       >
-                        <Share2 className="w-4 h-4" />
-                        <span className="font-sans">Share Gallery</span>
+                        <Share2 className="w-5 h-5 flex-shrink-0" />
+                        <span className="font-sans text-base">Share Gallery</span>
                       </button>
                       <button
-                        onClick={handleLogout}
-                        className="flex items-center space-x-2 px-3 py-2 w-full text-left text-red-600 hover:bg-red-50 rounded-md transition-colors duration-200"
+                        onClick={() => {
+                          handleLogout()
+                          setIsOpen(false)
+                        }}
+                        className="flex items-center space-x-3 px-4 py-3 w-full text-left text-red-600 hover:bg-red-50 rounded-lg transition-colors duration-200 touch-manipulation"
                       >
-                        <LogOut className="w-4 h-4" />
-                        <span className="font-sans">Sign Out</span>
+                        <LogOut className="w-5 h-5 flex-shrink-0" />
+                        <span className="font-sans text-base">Sign Out</span>
                       </button>
                     </div>
                   </>
@@ -149,7 +161,7 @@ export default function Navigation() {
         </div>
       </nav>
 
-      <ShareModal isOpen={showShareModal} onClose={() => setShowShareModal(false)} />
+      {showShareModal && <ShareModal isOpen={showShareModal} onClose={() => setShowShareModal(false)} />}
     </>
   )
 }
