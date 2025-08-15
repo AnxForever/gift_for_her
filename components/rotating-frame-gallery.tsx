@@ -16,15 +16,18 @@ import {
   Trash2,
   Save,
   X,
+  Upload,
 } from "lucide-react"
 import { PhotoManager } from "@/lib/photo-manager"
 
 interface DailyPhoto {
-  id: number
+  id: string
   src: string
   title: string
+  description?: string
+  date: string
+  category: string
   time: string
-  description: string
   mood: string
 }
 
@@ -41,10 +44,12 @@ export default function RotatingFrameGallery({ initialPhotos }: RotatingFrameGal
   const [isEditing, setIsEditing] = useState(false)
   const [editingPhoto, setEditingPhoto] = useState<DailyPhoto | null>(null)
   const [currentPage, setCurrentPage] = useState(0)
+  const [isUploading, setIsUploading] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState(0)
   const intervalRef = useRef<NodeJS.Timeout | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const PHOTOS_PER_PAGE = 6 // 每页最多显示6张照片
+  const PHOTOS_PER_PAGE = 6
 
   useEffect(() => {
     if (initialPhotos && initialPhotos.length > 0) {
@@ -54,17 +59,19 @@ export default function RotatingFrameGallery({ initialPhotos }: RotatingFrameGal
     }
   }, [initialPhotos])
 
-  const loadPhotos = () => {
+  const loadPhotos = async () => {
     const photoManager = PhotoManager.getInstance()
-    const dailyPhotos = photoManager.getPhotosByCategory("daily")
+    const dailyPhotos = await photoManager.getPhotosByCategory("daily")
     setPhotos(
       dailyPhotos.map((photo) => ({
         id: photo.id,
         src: photo.src,
         title: photo.title,
-        time: photo.location || "Daily",
         description: photo.description,
-        mood: photo.tags?.[0] || "peaceful",
+        date: photo.date || new Date().toISOString().split("T")[0],
+        category: photo.category,
+        time: photo.time || "Daily",
+        mood: photo.mood || "peaceful",
       })),
     )
   }
@@ -133,33 +140,94 @@ export default function RotatingFrameGallery({ initialPhotos }: RotatingFrameGal
     setIsAutoPlay(!isAutoPlay)
   }
 
-  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
     if (file) {
-      const reader = new FileReader()
-      reader.onload = (e) => {
+      if (file.size > 10 * 1024 * 1024) {
+        alert("图片文件太大，请选择小于10MB的图片")
+        return
+      }
+
+      if (!file.type.startsWith("image/")) {
+        alert("请选择有效的图片文件")
+        return
+      }
+
+      setIsUploading(true)
+      setUploadProgress(0)
+
+      const progressInterval = setInterval(() => {
+        setUploadProgress((prev) => {
+          if (prev >= 90) {
+            clearInterval(progressInterval)
+            return 90
+          }
+          return prev + 10
+        })
+      }, 200)
+
+      try {
         const photoManager = PhotoManager.getInstance()
+        const { url, storagePath } = await photoManager.uploadPhoto(file, "daily")
+
+        setUploadProgress(95)
+
         const newPhoto = {
-          src: e.target?.result as string,
+          src: url,
           title: `Daily Moment ${photos.length + 1}`,
           description: "A beautiful daily moment",
+          date: new Date().toISOString().split("T")[0],
           category: "daily" as const,
-          location: "Daily",
-          tags: ["peaceful"],
+          time: "Daily",
+          mood: "peaceful",
         }
-        photoManager.addPhoto(newPhoto)
-        loadPhotos()
+
+        await photoManager.addPhoto(newPhoto, storagePath)
+        setUploadProgress(100)
+
+        setTimeout(async () => {
+          await loadPhotos()
+          setIsUploading(false)
+          setUploadProgress(0)
+          clearInterval(progressInterval)
+        }, 500)
+      } catch (error) {
+        console.error("Failed to upload photo:", error)
+        alert("上传失败，请重试")
+        setIsUploading(false)
+        setUploadProgress(0)
       }
-      reader.readAsDataURL(file)
     }
+    event.target.value = ""
   }
 
-  const handleDeletePhoto = (photoId: number) => {
-    const photoManager = PhotoManager.getInstance()
-    photoManager.deletePhoto(photoId)
-    loadPhotos()
-    if (currentIndex >= currentPagePhotos.length - 1) {
-      setCurrentIndex(Math.max(0, currentPagePhotos.length - 2))
+  const handleDeletePhoto = async (photoId: string, event?: React.MouseEvent) => {
+    if (event) {
+      event.preventDefault()
+      event.stopPropagation()
+    }
+
+    if (!confirm("确定要删除这张照片吗？此操作无法撤销。")) {
+      return
+    }
+
+    try {
+      console.log("[v0] Attempting to delete photo with ID:", photoId)
+      const photoManager = PhotoManager.getInstance()
+      const success = await photoManager.deletePhoto(photoId)
+
+      if (success) {
+        console.log("[v0] Photo deleted successfully")
+        await loadPhotos()
+        if (currentIndex >= currentPagePhotos.length - 1) {
+          setCurrentIndex(Math.max(0, currentPagePhotos.length - 2))
+        }
+      } else {
+        throw new Error("删除失败")
+      }
+    } catch (error) {
+      console.error("[v0] Failed to delete photo:", error)
+      alert("删除失败，请重试")
     }
   }
 
@@ -167,17 +235,21 @@ export default function RotatingFrameGallery({ initialPhotos }: RotatingFrameGal
     setEditingPhoto(photo)
   }
 
-  const handleSaveEdit = () => {
+  const handleSaveEdit = async () => {
     if (editingPhoto) {
-      const photoManager = PhotoManager.getInstance()
-      photoManager.updatePhoto(editingPhoto.id, {
-        title: editingPhoto.title,
-        description: editingPhoto.description,
-        location: editingPhoto.time,
-        tags: [editingPhoto.mood],
-      })
-      loadPhotos()
-      setEditingPhoto(null)
+      try {
+        const photoManager = PhotoManager.getInstance()
+        await photoManager.updatePhoto(editingPhoto.id, {
+          title: editingPhoto.title,
+          description: editingPhoto.description || editingPhoto.title,
+          src: editingPhoto.src,
+        })
+        await loadPhotos()
+        setEditingPhoto(null)
+      } catch (error) {
+        console.error("Failed to update photo:", error)
+        alert("更新失败，请重试")
+      }
     }
   }
 
@@ -218,13 +290,23 @@ export default function RotatingFrameGallery({ initialPhotos }: RotatingFrameGal
     return (
       <div className="min-h-screen bg-gradient-to-br from-pink-50 via-white to-purple-50 flex items-center justify-center">
         <div className="text-center">
-          <h2 className="font-serif text-2xl text-gray-600 mb-4">No daily photos yet</h2>
+          <h2 className="font-serif text-2xl text-gray-600 mb-4">还没有日常照片</h2>
           <button
             onClick={() => fileInputRef.current?.click()}
-            className="px-6 py-3 bg-pink-500 hover:bg-pink-600 text-white rounded-full transition-colors duration-200"
+            disabled={isUploading}
+            className="px-6 py-3 bg-pink-500 hover:bg-pink-600 disabled:bg-pink-300 text-white rounded-full transition-colors duration-200 flex items-center gap-2 mx-auto"
           >
-            <Plus className="w-5 h-5 inline mr-2" />
-            Add First Photo
+            {isUploading ? (
+              <>
+                <Upload className="w-5 h-5 animate-spin" />
+                上传中...
+              </>
+            ) : (
+              <>
+                <Plus className="w-5 h-5" />
+                添加第一张照片
+              </>
+            )}
           </button>
           <input ref={fileInputRef} type="file" accept="image/*" onChange={handleFileUpload} className="hidden" />
         </div>
@@ -236,18 +318,26 @@ export default function RotatingFrameGallery({ initialPhotos }: RotatingFrameGal
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-pink-50 via-white to-purple-50">
-      {/* Header */}
+      {isUploading && (
+        <div className="fixed top-0 left-0 right-0 z-50 bg-white shadow-lg">
+          <div className="px-4 py-3">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-sm font-medium text-gray-700">上传中...</span>
+              <span className="text-sm text-gray-500">{uploadProgress}%</span>
+            </div>
+            <div className="w-full bg-gray-200 rounded-full h-2">
+              <div
+                className="bg-pink-500 h-2 rounded-full transition-all duration-300"
+                style={{ width: `${uploadProgress}%` }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="text-center pt-8 pb-6 px-4">
         <div className="flex items-center justify-center gap-4 mb-3">
           <h1 className="font-serif text-3xl md:text-4xl font-bold text-gray-800">Daily Moments</h1>
-          <button
-            onClick={() => setIsEditing(!isEditing)}
-            className={`px-4 py-2 rounded-full transition-colors duration-200 ${
-              isEditing ? "bg-gray-500 hover:bg-gray-600 text-white" : "bg-pink-500 hover:bg-pink-600 text-white"
-            }`}
-          >
-            {isEditing ? <X className="w-4 h-4" /> : <Edit3 className="w-4 h-4" />}
-          </button>
         </div>
         <p className="font-sans text-base md:text-lg text-gray-600 max-w-2xl mx-auto">
           Every ordinary day holds extraordinary beauty when shared with someone special
@@ -278,14 +368,12 @@ export default function RotatingFrameGallery({ initialPhotos }: RotatingFrameGal
 
       <div className="relative px-4 pb-8">
         <div className="max-w-md mx-auto">
-          {/* Main Photo Card */}
           <div
             className="relative bg-white rounded-3xl shadow-2xl overflow-hidden"
             onTouchStart={handleTouchStart}
             onTouchMove={handleTouchMove}
             onTouchEnd={handleTouchEnd}
           >
-            {/* Photo */}
             <div className="relative aspect-[3/4] overflow-hidden">
               <img
                 src={currentPhoto.src || "/placeholder.svg"}
@@ -294,26 +382,30 @@ export default function RotatingFrameGallery({ initialPhotos }: RotatingFrameGal
               />
 
               {isEditing && (
-                <div className="absolute top-4 right-4 flex gap-2">
+                <div className="absolute top-4 right-4 flex gap-2 z-10">
                   <button
-                    onClick={() => handleEditPhoto(currentPhoto)}
-                    className="w-8 h-8 bg-blue-500 hover:bg-blue-600 text-white rounded-full flex items-center justify-center transition-colors duration-200"
+                    onClick={(e) => {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      handleEditPhoto(currentPhoto)
+                    }}
+                    className="w-12 h-12 bg-blue-500 hover:bg-blue-600 text-white rounded-full flex items-center justify-center transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-105 cursor-pointer"
+                    style={{ pointerEvents: "auto" }}
                   >
-                    <Edit3 className="w-4 h-4" />
+                    <Edit3 className="w-5 h-5" />
                   </button>
                   <button
-                    onClick={() => handleDeletePhoto(currentPhoto.id)}
-                    className="w-8 h-8 bg-red-500 hover:bg-red-600 text-white rounded-full flex items-center justify-center transition-colors duration-200"
+                    onClick={(e) => handleDeletePhoto(currentPhoto.id, e)}
+                    className="w-12 h-12 bg-red-500 hover:bg-red-600 text-white rounded-full flex items-center justify-center transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-105 cursor-pointer"
+                    style={{ pointerEvents: "auto" }}
                   >
-                    <Trash2 className="w-4 h-4" />
+                    <Trash2 className="w-5 h-5" />
                   </button>
                 </div>
               )}
 
-              {/* Gradient overlay */}
               <div className="absolute inset-0 bg-gradient-to-t from-black/20 via-transparent to-transparent" />
 
-              {/* Navigation arrows - hidden on mobile, shown on desktop */}
               <button
                 onClick={prevPhoto}
                 className="absolute left-4 top-1/2 -translate-y-1/2 w-10 h-10 bg-white/80 backdrop-blur-sm rounded-full flex items-center justify-center shadow-lg transition-all duration-200 hover:bg-white hover:scale-110 hidden md:flex"
@@ -329,13 +421,12 @@ export default function RotatingFrameGallery({ initialPhotos }: RotatingFrameGal
               </button>
             </div>
 
-            {/* Photo Info */}
             <div className="p-6">
               <div className="flex items-center gap-3 mb-3">
                 {getMoodIcon(currentPhoto.mood)}
                 <h3 className="font-serif text-xl font-semibold text-gray-800">{currentPhoto.title}</h3>
                 <span className="ml-auto font-sans text-sm text-gray-500 bg-gray-100 px-3 py-1 rounded-full">
-                  {currentPhoto.time}
+                  {currentPhoto.date}
                 </span>
               </div>
 
@@ -343,45 +434,43 @@ export default function RotatingFrameGallery({ initialPhotos }: RotatingFrameGal
             </div>
           </div>
 
-          {/* Controls */}
           <div className="flex items-center justify-center gap-4 mt-6">
             <button
               onClick={() => fileInputRef.current?.click()}
-              className="flex items-center gap-2 px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded-full transition-colors duration-200 shadow-lg"
+              disabled={isUploading}
+              className="flex items-center gap-2 px-4 py-2 bg-green-500 hover:bg-green-600 disabled:bg-green-300 text-white rounded-full transition-colors duration-200 shadow-lg"
             >
-              <Plus className="w-4 h-4" />
-              <span className="font-sans text-sm">Add Photo</span>
+              {isUploading ? (
+                <>
+                  <Upload className="w-4 h-4 animate-spin" />
+                  <span className="font-sans text-sm">上传中...</span>
+                </>
+              ) : (
+                <>
+                  <Plus className="w-4 h-4" />
+                  <span className="font-sans text-sm">添加照片</span>
+                </>
+              )}
             </button>
 
-            {isEditing && (
-              <button
-                onClick={() => setIsEditing(!isEditing)}
-                className="flex items-center gap-2 px-4 py-2 bg-gray-500 hover:bg-gray-600 text-white rounded-full transition-colors duration-200 shadow-lg"
-              >
-                <X className="w-4 h-4" />
-                <span className="font-sans text-sm">Done Editing</span>
-              </button>
-            )}
-
-            {!isEditing && (
-              <button
-                onClick={() => setIsEditing(true)}
-                className="flex items-center gap-2 px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-full transition-colors duration-200 shadow-lg"
-              >
-                <Edit3 className="w-4 h-4" />
-                <span className="font-sans text-sm">Edit Photos</span>
-              </button>
-            )}
+            <button
+              onClick={() => setIsEditing(!isEditing)}
+              className={`flex items-center gap-2 px-4 py-2 rounded-full transition-colors duration-200 shadow-lg ${
+                isEditing ? "bg-gray-500 hover:bg-gray-600 text-white" : "bg-blue-500 hover:bg-blue-600 text-white"
+              }`}
+            >
+              {isEditing ? <X className="w-4 h-4" /> : <Edit3 className="w-4 h-4" />}
+              <span className="font-sans text-sm">{isEditing ? "完成" : "编辑"}</span>
+            </button>
 
             <button
               onClick={toggleAutoPlay}
               className="flex items-center gap-2 px-4 py-2 bg-indigo-500 hover:bg-indigo-600 text-white rounded-full transition-colors duration-200 shadow-lg"
             >
               {isAutoPlay ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-              <span className="font-sans text-sm">{isAutoPlay ? "Pause" : "Play"}</span>
+              <span className="font-sans text-sm">{isAutoPlay ? "暂停" : "播放"}</span>
             </button>
 
-            {/* Mobile navigation buttons */}
             <div className="flex gap-2 md:hidden">
               <button
                 onClick={prevPhoto}
@@ -399,7 +488,14 @@ export default function RotatingFrameGallery({ initialPhotos }: RotatingFrameGal
             </div>
           </div>
 
-          {/* Photo Indicators */}
+          {isEditing && (
+            <div className="text-center mt-4">
+              <p className="font-sans text-sm text-gray-600 bg-blue-50 px-4 py-2 rounded-full">
+                点击照片上的编辑或删除按钮来管理您的图片
+              </p>
+            </div>
+          )}
+
           <div className="flex justify-center gap-2 mt-6">
             {currentPagePhotos.map((_, index) => (
               <button
@@ -415,13 +511,11 @@ export default function RotatingFrameGallery({ initialPhotos }: RotatingFrameGal
             ))}
           </div>
 
-          {/* Swipe Instructions - Mobile only */}
           <div className="text-center mt-6 md:hidden">
-            <p className="font-sans text-sm text-gray-500">Swipe left or right to browse photos</p>
+            <p className="font-sans text-sm text-gray-500">左右滑动浏览照片</p>
           </div>
         </div>
 
-        {/* Preview thumbnails - Desktop only */}
         <div className="hidden lg:block absolute top-1/2 -translate-y-1/2 left-8">
           <div className="space-y-4">
             {currentPagePhotos.map((photo, index) => (
@@ -460,11 +554,11 @@ export default function RotatingFrameGallery({ initialPhotos }: RotatingFrameGal
       {editingPhoto && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl p-6 w-full max-w-md">
-            <h3 className="font-serif text-xl font-semibold mb-4">Edit Photo</h3>
+            <h3 className="font-serif text-xl font-semibold mb-4">编辑照片</h3>
 
             <div className="space-y-4">
               <div>
-                <label className="block font-sans text-sm font-medium text-gray-700 mb-1">Title</label>
+                <label className="block font-sans text-sm font-medium text-gray-700 mb-1">标题</label>
                 <input
                   type="text"
                   value={editingPhoto.title}
@@ -474,7 +568,7 @@ export default function RotatingFrameGallery({ initialPhotos }: RotatingFrameGal
               </div>
 
               <div>
-                <label className="block font-sans text-sm font-medium text-gray-700 mb-1">Time</label>
+                <label className="block font-sans text-sm font-medium text-gray-700 mb-1">时间</label>
                 <input
                   type="text"
                   value={editingPhoto.time}
@@ -484,9 +578,9 @@ export default function RotatingFrameGallery({ initialPhotos }: RotatingFrameGal
               </div>
 
               <div>
-                <label className="block font-sans text-sm font-medium text-gray-700 mb-1">Description</label>
+                <label className="block font-sans text-sm font-medium text-gray-700 mb-1">描述</label>
                 <textarea
-                  value={editingPhoto.description}
+                  value={editingPhoto.description || ""}
                   onChange={(e) => setEditingPhoto({ ...editingPhoto, description: e.target.value })}
                   rows={3}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent"
@@ -494,18 +588,18 @@ export default function RotatingFrameGallery({ initialPhotos }: RotatingFrameGal
               </div>
 
               <div>
-                <label className="block font-sans text-sm font-medium text-gray-700 mb-1">Mood</label>
+                <label className="block font-sans text-sm font-medium text-gray-700 mb-1">心情</label>
                 <select
                   value={editingPhoto.mood}
                   onChange={(e) => setEditingPhoto({ ...editingPhoto, mood: e.target.value })}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent"
                 >
-                  <option value="peaceful">Peaceful</option>
-                  <option value="joyful">Joyful</option>
-                  <option value="content">Content</option>
-                  <option value="loving">Loving</option>
-                  <option value="relaxed">Relaxed</option>
-                  <option value="romantic">Romantic</option>
+                  <option value="peaceful">平静</option>
+                  <option value="joyful">快乐</option>
+                  <option value="content">满足</option>
+                  <option value="loving">爱意</option>
+                  <option value="relaxed">放松</option>
+                  <option value="romantic">浪漫</option>
                 </select>
               </div>
             </div>
@@ -516,13 +610,13 @@ export default function RotatingFrameGallery({ initialPhotos }: RotatingFrameGal
                 className="flex-1 px-4 py-2 bg-pink-500 hover:bg-pink-600 text-white rounded-lg transition-colors duration-200"
               >
                 <Save className="w-4 h-4 inline mr-2" />
-                Save
+                保存
               </button>
               <button
                 onClick={() => setEditingPhoto(null)}
                 className="flex-1 px-4 py-2 bg-gray-500 hover:bg-gray-600 text-white rounded-lg transition-colors duration-200"
               >
-                Cancel
+                取消
               </button>
             </div>
           </div>

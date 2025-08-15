@@ -6,6 +6,8 @@ import { PermissionsProvider } from "@/lib/permissions"
 import Navigation from "@/components/navigation"
 import { GuestBanner } from "@/components/guest-banner"
 import TravelScrapbook from "@/components/travel-scrapbook"
+import { photoManager } from "@/lib/photo-manager" // Import PhotoManager for database queries
+import { supabase } from "@/lib/supabase" // Import Supabase client
 import type { TravelPhoto } from "@/lib/photo-manager"
 
 export default function PublicTravelGalleryPage() {
@@ -16,23 +18,31 @@ export default function PublicTravelGalleryPage() {
   const [userExists, setUserExists] = useState(true)
 
   useEffect(() => {
-    const loadPhotos = () => {
-      // Get user data
-      const users = JSON.parse(localStorage.getItem("users") || "[]")
-      const user = users.find((u: any) => u.username === username)
+    const loadPhotos = async () => {
+      // Make function async for database queries
+      try {
+        const { data: user, error: userError } = await supabase
+          .from("users")
+          .select("id, username")
+          .eq("username", username)
+          .single()
 
-      if (!user) {
+        if (userError || !user) {
+          setUserExists(false)
+          setLoading(false)
+          return
+        }
+
+        const allPhotos = await photoManager.getPhotosByUser(username)
+        const travelPhotos = allPhotos.filter((p) => p.category === "travel") as TravelPhoto[]
+
+        setPhotos(travelPhotos)
+        setLoading(false)
+      } catch (error) {
+        console.error("Error loading travel photos:", error)
         setUserExists(false)
         setLoading(false)
-        return
       }
-
-      // Get user's travel photos
-      const userPhotos = JSON.parse(localStorage.getItem(`gallery-photos-${user.id}`) || "[]")
-      const travelPhotos = userPhotos.filter((p: any) => p.category === "travel")
-
-      setPhotos(travelPhotos)
-      setLoading(false)
     }
 
     loadPhotos()

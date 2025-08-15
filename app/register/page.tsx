@@ -1,43 +1,38 @@
 "use client"
-
-import type React from "react"
-
-import { useState } from "react"
-import { useRouter } from "next/navigation"
+import { useActionState } from "react"
+import { useFormStatus } from "react-dom"
 import Link from "next/link"
-import { useAuth } from "@/lib/auth-context"
+import { signUp } from "@/lib/actions"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Heart, Mail, Lock, User, Sparkles } from "lucide-react"
+import { Heart, Mail, Lock, User, Sparkles, Loader2 } from "lucide-react"
+
+function SubmitButton() {
+  const { pending } = useFormStatus()
+
+  return (
+    <Button
+      type="submit"
+      disabled={pending}
+      className={`w-full font-semibold transition-all duration-300 ${
+        pending ? "glass-pink-disabled" : "glass-pink hover:scale-105"
+      }`}
+    >
+      {pending ? (
+        <>
+          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+          Creating Account...
+        </>
+      ) : (
+        "Create Account"
+      )}
+    </Button>
+  )
+}
 
 export default function RegisterPage() {
-  const [username, setUsername] = useState("")
-  const [email, setEmail] = useState("")
-  const [password, setPassword] = useState("")
-  const [displayName, setDisplayName] = useState("")
-  const [error, setError] = useState("")
-  const { register, isLoading } = useAuth()
-  const router = useRouter()
-
-  const isFormValid = username.trim() && email.trim() && password.length >= 6 && displayName.trim()
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setError("")
-
-    if (password.length < 6) {
-      setError("Password must be at least 6 characters")
-      return
-    }
-
-    const success = await register(username, email, password, displayName)
-    if (success) {
-      router.push("/")
-    } else {
-      setError("Username or email already exists")
-    }
-  }
+  const [state, formAction] = useActionState(signUp, null)
 
   return (
     <div className="min-h-screen romantic-gradient flex items-center justify-center p-4">
@@ -65,18 +60,21 @@ export default function RegisterPage() {
           <CardDescription className="text-gray-600">Start your beautiful photo journey</CardDescription>
         </CardHeader>
         <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form action={formAction} className="space-y-4">
+            {state?.error && (
+              <div className="bg-red-500/10 border border-red-500/50 text-red-700 px-4 py-3 rounded">{state.error}</div>
+            )}
+
+            {state?.success && (
+              <div className="bg-green-500/10 border border-green-500/50 text-green-700 px-4 py-3 rounded">
+                {state.success}
+              </div>
+            )}
+
             <div className="space-y-2">
               <div className="relative">
                 <User className="absolute left-3 top-3 text-gray-400" size={18} />
-                <Input
-                  type="text"
-                  placeholder="Username"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  className="pl-10 glass-button"
-                  required
-                />
+                <Input name="username" type="text" placeholder="Username" className="pl-10 glass-button" required />
               </div>
             </div>
 
@@ -84,10 +82,9 @@ export default function RegisterPage() {
               <div className="relative">
                 <Sparkles className="absolute left-3 top-3 text-gray-400" size={18} />
                 <Input
+                  name="displayName"
                   type="text"
                   placeholder="Display Name"
-                  value={displayName}
-                  onChange={(e) => setDisplayName(e.target.value)}
                   className="pl-10 glass-button"
                   required
                 />
@@ -97,14 +94,7 @@ export default function RegisterPage() {
             <div className="space-y-2">
               <div className="relative">
                 <Mail className="absolute left-3 top-3 text-gray-400" size={18} />
-                <Input
-                  type="email"
-                  placeholder="Email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="pl-10 glass-button"
-                  required
-                />
+                <Input name="email" type="email" placeholder="Email" className="pl-10 glass-button" required />
               </div>
             </div>
 
@@ -112,27 +102,16 @@ export default function RegisterPage() {
               <div className="relative">
                 <Lock className="absolute left-3 top-3 text-gray-400" size={18} />
                 <Input
+                  name="password"
                   type="password"
                   placeholder="Password (min 6 characters)"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
                   className="pl-10 glass-button"
                   required
                 />
               </div>
             </div>
 
-            {error && <p className="text-red-500 text-sm text-center">{error}</p>}
-
-            <Button
-              type="submit"
-              className={`w-full font-semibold transition-all duration-300 ${
-                isFormValid && !isLoading ? "glass-pink hover:scale-105" : "glass-pink-disabled"
-              }`}
-              disabled={!isFormValid || isLoading}
-            >
-              {isLoading ? "Creating Account..." : "Create Account"}
-            </Button>
+            <SubmitButton />
           </form>
 
           <div className="mt-6 text-center">

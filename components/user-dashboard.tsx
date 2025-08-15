@@ -11,9 +11,10 @@ import { Camera, Heart, User, Calendar, Share2, Plus, Eye, TrendingUp, MapPin, E
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
+import { supabase } from "@/lib/supabase"
 
 export default function UserDashboard() {
-  const { user } = useAuth()
+  const { user, supabaseUser } = useAuth() // Use both user and supabaseUser from new auth context
   const [photos, setPhotos] = useState<Photo[]>([])
   const [showShareModal, setShowShareModal] = useState(false)
   const [isEditingProfile, setIsEditingProfile] = useState(false)
@@ -31,50 +32,73 @@ export default function UserDashboard() {
   })
 
   useEffect(() => {
-    if (user) {
+    if (user && supabaseUser) {
+      photoManager.setCurrentUser(supabaseUser.id)
       loadPhotos()
       loadProfile()
     }
-  }, [user])
+  }, [user, supabaseUser])
 
-  const loadPhotos = () => {
-    const allPhotos = photoManager.getAllPhotos()
-    setPhotos(allPhotos)
+  const loadPhotos = async () => {
+    try {
+      const allPhotos = await photoManager.getAllPhotos() // Now async
+      setPhotos(allPhotos)
 
-    const newStats = {
-      total: allPhotos.length,
-      travel: allPhotos.filter((p) => p.category === "travel").length,
-      selfie: allPhotos.filter((p) => p.category === "selfie").length,
-      festival: allPhotos.filter((p) => p.category === "festival").length,
-      daily: allPhotos.filter((p) => p.category === "daily").length,
+      const newStats = {
+        total: allPhotos.length,
+        travel: allPhotos.filter((p) => p.category === "travel").length,
+        selfie: allPhotos.filter((p) => p.category === "selfie").length,
+        festival: allPhotos.filter((p) => p.category === "festival").length,
+        daily: allPhotos.filter((p) => p.category === "daily").length,
+      }
+      setStats(newStats)
+    } catch (error) {
+      console.error("Error loading photos:", error)
     }
-    setStats(newStats)
   }
 
   const loadProfile = () => {
     if (user) {
-      const savedProfile = localStorage.getItem(`profile_${user.id}`)
-      if (savedProfile) {
-        setProfileData(JSON.parse(savedProfile))
+      setProfileData({
+        avatar: user.avatarUrl || "",
+        bio: user.bio || "",
+        location: user.location || "",
+      })
+    }
+  }
+
+  const saveProfile = async () => {
+    if (user && supabaseUser) {
+      try {
+        const { error } = await supabase
+          .from("user_profiles")
+          .update({
+            avatar_url: profileData.avatar,
+            bio: profileData.bio,
+            location: profileData.location,
+          })
+          .eq("id", supabaseUser.id)
+
+        if (error) {
+          console.error("Error updating profile:", error)
+        } else {
+          setIsEditingProfile(false)
+        }
+      } catch (error) {
+        console.error("Error saving profile:", error)
       }
     }
   }
 
-  const saveProfile = () => {
-    if (user) {
-      localStorage.setItem(`profile_${user.id}`, JSON.stringify(profileData))
-      setIsEditingProfile(false)
-    }
-  }
-
-  const handleAvatarUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
-    if (file) {
-      const reader = new FileReader()
-      reader.onload = (e) => {
-        setProfileData((prev) => ({ ...prev, avatar: e.target?.result as string }))
+    if (file && supabaseUser) {
+      try {
+        const avatarUrl = await photoManager.uploadPhoto(file, "daily") // Reuse upload logic
+        setProfileData((prev) => ({ ...prev, avatar: avatarUrl }))
+      } catch (error) {
+        console.error("Error uploading avatar:", error)
       }
-      reader.readAsDataURL(file)
     }
   }
 

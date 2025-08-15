@@ -3,27 +3,20 @@
 import type React from "react"
 import { useState, useEffect } from "react"
 import { Edit3, Plus, X, Save, BarChart3 } from "lucide-react"
-import { photoManager } from "@/lib/photo-manager"
+import { photoManager, type SelfiePhoto } from "@/lib/photo-manager"
 import { usePermissions } from "@/lib/permissions"
-
-interface SelfiePhoto {
-  id: number
-  src: string
-  date: string
-  season: string
-  caption: string
-  mood: string
-  location?: string
-}
+import { useAuth } from "@/lib/auth-context"
 
 export default function TimelineSelfieGallery() {
   const [mounted, setMounted] = useState(false)
   const [selfiePhotos, setSelfiePhotos] = useState<SelfiePhoto[]>([])
   const [isEditMode, setIsEditMode] = useState(false)
-  const [editingPhoto, setEditingPhoto] = useState<number | null>(null)
+  const [editingPhoto, setEditingPhoto] = useState<string | null>(null)
   const [showStats, setShowStats] = useState(false)
   const [filterMood, setFilterMood] = useState<string>("all")
+  const [isUploading, setIsUploading] = useState(false)
   const [editForm, setEditForm] = useState({
+    title: "",
     caption: "",
     date: "",
     season: "Spring",
@@ -31,63 +24,75 @@ export default function TimelineSelfieGallery() {
     location: "",
   })
   const { canEdit } = usePermissions()
+  const { supabaseUser } = useAuth()
 
   useEffect(() => {
     setMounted(true)
-    loadPhotos()
-  }, [])
+    if (canEdit && supabaseUser) {
+      photoManager.setCurrentUser(supabaseUser.id)
+      loadPhotos()
+    }
+  }, [canEdit, supabaseUser])
 
-  const loadPhotos = () => {
-    const photos = photoManager.getPhotosByCategory("selfie")
+  const loadPhotos = async () => {
+    if (!supabaseUser) return
 
-    const formattedPhotos: SelfiePhoto[] = photos.map((photo, index) => ({
-      id: photo.id,
-      src: photo.src,
-      date: photo.date || `2024-0${(index % 12) + 1}-${(index % 28) + 1}`,
-      season: photo.season || "Spring",
-      caption: photo.caption,
-      mood: photo.mood || "joyful",
-      location: photo.location,
-    }))
-
-    setSelfiePhotos(formattedPhotos)
-  }
-
-  const handlePhotoUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-    if (!canEdit) return
-
-    const file = event.target.files?.[0]
-    if (file) {
-      const reader = new FileReader()
-      reader.onload = (e) => {
-        const newPhoto = {
-          src: e.target?.result as string,
-          caption: "New selfie moment",
-          category: "selfie" as const,
-          date: new Date().toISOString().split("T")[0],
-          season: "Spring",
-          mood: "joyful",
-          location: "",
-        }
-        photoManager.addPhoto(newPhoto)
-        loadPhotos()
-      }
-      reader.readAsDataURL(file)
+    try {
+      const photos = (await photoManager.getPhotosByCategory("selfie")) as SelfiePhoto[]
+      setSelfiePhotos(photos)
+    } catch (error) {
+      console.error("Error loading selfie photos:", error)
     }
   }
 
-  const handleDeletePhoto = (photoId: number) => {
-    if (!canEdit) return
+  const handlePhotoUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (!canEdit || !supabaseUser) return
+
+    const file = event.target.files?.[0]
+    if (!file) return
+
+    setIsUploading(true)
+    try {
+      const { url, storagePath } = await photoManager.uploadPhoto(file, "selfie")
+
+      const newPhoto: Omit<SelfiePhoto, "id" | "userId"> = {
+        src: url,
+        title: "New Selfie Moment",
+        description: "A beautiful selfie moment",
+        date: new Date().toISOString().split("T")[0],
+        category: "selfie",
+        season: "Spring",
+        caption: "New selfie moment",
+        mood: "joyful",
+        location: "",
+      }
+
+      await photoManager.addPhoto(newPhoto, storagePath)
+      await loadPhotos()
+    } catch (error) {
+      console.error("Upload failed:", error)
+    } finally {
+      setIsUploading(false)
+    }
+  }
+
+  const handleDeletePhoto = async (photoId: string) => {
+    if (!canEdit || !supabaseUser) return
 
     if (confirm("Are you sure you want to delete this photo?")) {
-      photoManager.deletePhoto(photoId)
-      loadPhotos()
+      try {
+        await photoManager.deletePhoto(photoId)
+        await loadPhotos()
+      } catch (error) {
+        console.error("Error deleting photo:", error)
+      }
     }
   }
 
   const startEditPhoto = (photo: SelfiePhoto) => {
     setEditingPhoto(photo.id)
     setEditForm({
+      title: photo.title,
       caption: photo.caption,
       date: photo.date,
       season: photo.season,
@@ -96,11 +101,19 @@ export default function TimelineSelfieGallery() {
     })
   }
 
-  const savePhotoEdit = () => {
-    if (editingPhoto) {
-      photoManager.updatePhoto(editingPhoto, editForm)
+  const savePhotoEdit = async () => {
+    if (!editingPhoto || !supabaseUser) return
+
+    try {
+      await photoManager.updatePhoto(editingPhoto, {
+        title: editForm.title,
+        description: editForm.caption,
+        src: "", // Keep existing src
+      })
       setEditingPhoto(null)
-      loadPhotos()
+      await loadPhotos()
+    } catch (error) {
+      console.error("Error updating photo:", error)
     }
   }
 
@@ -182,8 +195,14 @@ export default function TimelineSelfieGallery() {
         <div className="flex flex-wrap justify-center gap-3 mb-6">
           <label className="px-4 py-2 bg-green-600 text-white rounded-full font-sans font-medium hover:bg-green-700 transition-colors cursor-pointer shadow-lg border-2 border-green-700">
             <Plus className="w-4 h-4 inline mr-2" />
-            Add Photo
-            <input type="file" accept="image/*" onChange={handlePhotoUpload} className="hidden" />
+            {isUploading ? "Uploading..." : "Add Photo"}
+            <input
+              type="file"
+              accept="image/*"
+              onChange={handlePhotoUpload}
+              className="hidden"
+              disabled={isUploading}
+            />
           </label>
 
           {canEdit && (
@@ -295,7 +314,7 @@ export default function TimelineSelfieGallery() {
 
                         <div className="absolute inset-0 bg-gradient-to-br from-yellow-100/20 via-transparent to-amber-200/20 mix-blend-overlay"></div>
 
-                        {canEdit && (
+                        {canEdit && isEditMode && (
                           <div className="absolute top-1 right-1 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
                             <button
                               onClick={() => startEditPhoto(photo)}
@@ -344,12 +363,19 @@ export default function TimelineSelfieGallery() {
         )}
       </div>
 
-      {/* Edit Modal - keeping existing modal */}
+      {/* Edit Modal */}
       {editingPhoto && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl p-6 w-full max-w-md max-h-[90vh] overflow-y-auto">
             <h3 className="font-serif text-xl font-semibold mb-4">Edit Photo</h3>
             <div className="space-y-4">
+              <input
+                type="text"
+                value={editForm.title}
+                onChange={(e) => setEditForm({ ...editForm, title: e.target.value })}
+                className="w-full p-3 border rounded-lg font-sans"
+                placeholder="Title"
+              />
               <input
                 type="text"
                 value={editForm.caption}

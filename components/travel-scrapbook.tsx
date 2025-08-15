@@ -6,6 +6,7 @@ import { useState, useEffect } from "react"
 import { MapPin, Plane, Camera, Heart, Star, Edit, Upload, Trash2, Save, X } from "lucide-react"
 import { photoManager, type TravelPhoto } from "@/lib/photo-manager"
 import { usePermissions } from "@/lib/permissions"
+import { useAuth } from "@/lib/auth-context"
 import { EditButton } from "@/components/edit-button"
 
 interface TravelScrapbookProps {
@@ -14,17 +15,19 @@ interface TravelScrapbookProps {
 
 export default function TravelScrapbook({ initialPhotos }: TravelScrapbookProps) {
   const [photos, setPhotos] = useState<TravelPhoto[]>(initialPhotos || [])
-  const [hoveredPhoto, setHoveredPhoto] = useState<number | null>(null)
+  const [hoveredPhoto, setHoveredPhoto] = useState<string | null>(null) // Changed from number to string for UUID
   const [mounted, setMounted] = useState(false)
   const [isMobile, setIsMobile] = useState(false)
   const [isEditMode, setIsEditMode] = useState(false)
   const [editingPhoto, setEditingPhoto] = useState<TravelPhoto | null>(null)
   const [isUploading, setIsUploading] = useState(false)
   const { canEdit } = usePermissions()
+  const { supabaseUser } = useAuth() // Added Supabase user for authentication
 
   useEffect(() => {
     setMounted(true)
-    if (!initialPhotos && canEdit) {
+    if (!initialPhotos && canEdit && supabaseUser) {
+      photoManager.setCurrentUser(supabaseUser.id) // Set current user for PhotoManager
       loadPhotos()
     }
     const checkMobile = () => {
@@ -33,27 +36,31 @@ export default function TravelScrapbook({ initialPhotos }: TravelScrapbookProps)
     checkMobile()
     window.addEventListener("resize", checkMobile)
     return () => window.removeEventListener("resize", checkMobile)
-  }, [initialPhotos, canEdit])
+  }, [initialPhotos, canEdit, supabaseUser])
 
-  const loadPhotos = () => {
-    if (canEdit) {
-      const travelPhotos = photoManager.getPhotosByCategory("travel") as TravelPhoto[]
-      setPhotos(travelPhotos)
+  const loadPhotos = async () => {
+    if (canEdit && supabaseUser) {
+      try {
+        const travelPhotos = (await photoManager.getPhotosByCategory("travel")) as TravelPhoto[]
+        setPhotos(travelPhotos)
+      } catch (error) {
+        console.error("Error loading photos:", error)
+      }
     }
   }
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    if (!canEdit) return
+    if (!canEdit || !supabaseUser) return
 
     const file = event.target.files?.[0]
     if (!file) return
 
     setIsUploading(true)
     try {
-      const src = await photoManager.uploadPhoto(file, "travel")
+      const { url, storagePath } = await photoManager.uploadPhoto(file, "travel")
 
-      const newPhoto: Omit<TravelPhoto, "id"> = {
-        src,
+      const newPhoto: Omit<TravelPhoto, "id" | "userId"> = {
+        src: url, // Use the URL from the upload result
         title: "New Travel Photo",
         description: "Add description...",
         date: new Date().toISOString().split("T")[0],
@@ -66,8 +73,8 @@ export default function TravelScrapbook({ initialPhotos }: TravelScrapbookProps)
         type: "polaroid",
       }
 
-      photoManager.addPhoto(newPhoto)
-      loadPhotos()
+      await photoManager.addPhoto(newPhoto, storagePath)
+      await loadPhotos() // Reload photos after adding
     } catch (error) {
       console.error("Upload failed:", error)
     } finally {
@@ -75,21 +82,30 @@ export default function TravelScrapbook({ initialPhotos }: TravelScrapbookProps)
     }
   }
 
-  const handleDeletePhoto = (id: number) => {
-    if (!canEdit) return
+  const handleDeletePhoto = async (id: string) => {
+    // Changed parameter type to string
+    if (!canEdit || !supabaseUser) return
 
     if (confirm("Are you sure you want to delete this photo?")) {
-      photoManager.deletePhoto(id)
-      loadPhotos()
+      try {
+        await photoManager.deletePhoto(id) // Now async
+        await loadPhotos() // Reload photos after deletion
+      } catch (error) {
+        console.error("Error deleting photo:", error)
+      }
     }
   }
 
-  const handleSavePhoto = (photo: TravelPhoto) => {
-    if (!canEdit) return
+  const handleSavePhoto = async (photo: TravelPhoto) => {
+    if (!canEdit || !supabaseUser) return
 
-    photoManager.updatePhoto(photo.id, photo)
-    setEditingPhoto(null)
-    loadPhotos()
+    try {
+      await photoManager.updatePhoto(photo.id, photo) // Now async
+      setEditingPhoto(null)
+      await loadPhotos() // Reload photos after update
+    } catch (error) {
+      console.error("Error updating photo:", error)
+    }
   }
 
   const getPhotoStyle = (photo: TravelPhoto) => ({
@@ -412,10 +428,6 @@ export default function TravelScrapbook({ initialPhotos }: TravelScrapbookProps)
             )}
           </div>
         ))}
-
-        {/* Washi tape decorations */}
-        <div className="absolute top-1/4 left-0 w-full h-6 bg-gradient-to-r from-transparent via-pink-200 to-transparent opacity-60 rotate-12" />
-        <div className="absolute bottom-1/3 right-0 w-full h-4 bg-gradient-to-l from-transparent via-yellow-200 to-transparent opacity-50 -rotate-6" />
       </div>
 
       {/* Bottom decorative elements */}

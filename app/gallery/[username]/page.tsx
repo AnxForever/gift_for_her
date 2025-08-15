@@ -5,6 +5,8 @@ import { useParams } from "next/navigation"
 import { PermissionsProvider } from "@/lib/permissions"
 import Navigation from "@/components/navigation"
 import { GuestBanner } from "@/components/guest-banner"
+import { supabase } from "@/lib/supabase" // Import Supabase client
+import { photoManager } from "@/lib/photo-manager" // Import PhotoManager for photo queries
 import Link from "next/link"
 import { Camera, Heart, User, Calendar } from "lucide-react"
 
@@ -27,43 +29,46 @@ export default function PublicGalleryPage() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    const loadGallery = () => {
+    const loadGallery = async () => {
+      // Make function async for database queries
       console.log("Loading gallery for username:", username)
 
-      // Get user data
-      const users = JSON.parse(localStorage.getItem("users") || "[]")
-      console.log("All users:", users)
+      try {
+        const { data: user, error: userError } = await supabase
+          .from("users")
+          .select("id, username, display_name")
+          .eq("username", username)
+          .single()
 
-      const user = users.find((u: any) => u.username === username)
-      console.log("Found user:", user)
+        console.log("Found user:", user)
 
-      if (!user) {
-        console.log("User not found for username:", username)
+        if (userError || !user) {
+          console.log("User not found for username:", username, userError)
+          setLoading(false)
+          return
+        }
+
+        const userPhotos = await photoManager.getPhotosByUser(username)
+        console.log("User photos:", userPhotos.length)
+
+        const categories = {
+          travel: userPhotos.filter((p) => p.category === "travel").length,
+          selfie: userPhotos.filter((p) => p.category === "selfie").length,
+          festival: userPhotos.filter((p) => p.category === "festival").length,
+          daily: userPhotos.filter((p) => p.category === "daily").length,
+        }
+
+        setGallery({
+          username: user.username,
+          displayName: user.display_name,
+          photoCount: userPhotos.length,
+          categories,
+        })
         setLoading(false)
-        return
+      } catch (error) {
+        console.error("Error loading gallery:", error)
+        setLoading(false)
       }
-
-      // Get user's photos
-      const photoKey = `gallery-photos-${user.id}`
-      console.log("Looking for photos with key:", photoKey)
-
-      const userPhotos = JSON.parse(localStorage.getItem(photoKey) || "[]")
-      console.log("User photos:", userPhotos)
-
-      const categories = {
-        travel: userPhotos.filter((p: any) => p.category === "travel").length,
-        selfie: userPhotos.filter((p: any) => p.category === "selfie").length,
-        festival: userPhotos.filter((p: any) => p.category === "festival").length,
-        daily: userPhotos.filter((p: any) => p.category === "daily").length,
-      }
-
-      setGallery({
-        username: user.username,
-        displayName: user.displayName,
-        photoCount: userPhotos.length,
-        categories,
-      })
-      setLoading(false)
     }
 
     loadGallery()
@@ -90,7 +95,7 @@ export default function PublicGalleryPage() {
             <p>
               Looking for user: <strong>{username}</strong>
             </p>
-            <p>Check browser console for debug information</p>
+            <p>This user may not have created a gallery yet.</p>
           </div>
         </div>
       </div>

@@ -50,9 +50,9 @@ export default function FestivalCardGallery({ initialPhotos }: FestivalCardGalle
     }
   }, [initialPhotos])
 
-  const loadPhotos = () => {
+  const loadPhotos = async () => {
     const photoManager = PhotoManager.getInstance()
-    const photos = photoManager.getPhotosByCategory("festival")
+    const photos = await photoManager.getPhotosByCategory("festival")
 
     const formattedPhotos: FestivalPhoto[] = photos.map((photo) => ({
       id: photo.id,

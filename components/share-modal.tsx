@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useAuth } from "@/lib/auth-context"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -15,10 +15,15 @@ interface ShareModalProps {
 export function ShareModal({ isOpen, onClose }: ShareModalProps) {
   const { user } = useAuth()
   const [copied, setCopied] = useState(false)
+  const [shareUrl, setShareUrl] = useState("")
+
+  useEffect(() => {
+    if (user && typeof window !== "undefined") {
+      setShareUrl(`${window.location.origin}/gallery/${user.username}`)
+    }
+  }, [user])
 
   if (!user) return null
-
-  const shareUrl = `${window.location.origin}/gallery/${user.username}`
 
   const handleCopyLink = async () => {
     try {
@@ -27,6 +32,19 @@ export function ShareModal({ isOpen, onClose }: ShareModalProps) {
       setTimeout(() => setCopied(false), 2000)
     } catch (err) {
       console.error("Failed to copy link:", err)
+      // Fallback for browsers that don't support clipboard API
+      const textArea = document.createElement("textarea")
+      textArea.value = shareUrl
+      document.body.appendChild(textArea)
+      textArea.select()
+      try {
+        document.execCommand("copy")
+        setCopied(true)
+        setTimeout(() => setCopied(false), 2000)
+      } catch (fallbackErr) {
+        console.error("Fallback copy failed:", fallbackErr)
+      }
+      document.body.removeChild(textArea)
     }
   }
 
@@ -59,14 +77,17 @@ export function ShareModal({ isOpen, onClose }: ShareModalProps) {
             <Share2 className="w-5 h-5 text-pink-500" />
             <span>Share Your Gallery</span>
           </DialogTitle>
-          <DialogDescription>Share your beautiful photo collection with friends and family.</DialogDescription>
+          <DialogDescription>
+            Share your beautiful photo collection with friends and family. Anyone with this link can view your public
+            gallery.
+          </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
           <div className="space-y-2">
             <label className="text-sm font-medium text-gray-700">Gallery Link</label>
             <div className="flex space-x-2">
-              <Input value={shareUrl} readOnly className="flex-1" />
+              <Input value={shareUrl} readOnly className="flex-1 text-sm" />
               <Button onClick={handleCopyLink} size="sm" className="glass-pink text-white">
                 {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
               </Button>
@@ -104,6 +125,15 @@ export function ShareModal({ isOpen, onClose }: ShareModalProps) {
                 <Mail className="w-4 h-4 mr-2 text-gray-600" />
                 Email
               </Button>
+            </div>
+          </div>
+
+          <div className="border-t pt-4">
+            <label className="text-sm font-medium text-gray-700 mb-2 block">Preview</label>
+            <div className="bg-gray-50 p-3 rounded-lg text-sm">
+              <p className="font-medium text-gray-800">{user.displayName}'s Photo Gallery</p>
+              <p className="text-gray-600 text-xs mt-1">A beautiful collection of precious moments</p>
+              <p className="text-gray-500 text-xs mt-2">{shareUrl}</p>
             </div>
           </div>
         </div>
