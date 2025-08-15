@@ -1,7 +1,6 @@
 "use server"
 
-import { createServerActionClient } from "@supabase/auth-helpers-nextjs"
-import { cookies } from "next/headers"
+import { createClient } from "@/lib/supabase/server"
 import { redirect } from "next/navigation"
 
 export async function signIn(prevState: any, formData: FormData) {
@@ -16,8 +15,7 @@ export async function signIn(prevState: any, formData: FormData) {
     return { error: "Email and password are required" }
   }
 
-  const cookieStore = cookies()
-  const supabase = createServerActionClient({ cookies: () => cookieStore })
+  const supabase = createClient()
 
   try {
     const { error } = await supabase.auth.signInWithPassword({
@@ -50,8 +48,7 @@ export async function signUp(prevState: any, formData: FormData) {
     return { error: "All fields are required" }
   }
 
-  const cookieStore = cookies()
-  const supabase = createServerActionClient({ cookies: () => cookieStore })
+  const supabase = createClient()
 
   try {
     const { data, error } = await supabase.auth.signUp({
@@ -68,8 +65,6 @@ export async function signUp(prevState: any, formData: FormData) {
       return { error: error.message }
     }
 
-    // Now only using Supabase's built-in auth system
-
     return { success: "Check your email to confirm your account." }
   } catch (error) {
     console.error("Sign up error:", error)
@@ -78,9 +73,7 @@ export async function signUp(prevState: any, formData: FormData) {
 }
 
 export async function signOut() {
-  const cookieStore = cookies()
-  const supabase = createServerActionClient({ cookies: () => cookieStore })
-
+  const supabase = createClient()
   await supabase.auth.signOut()
   redirect("/login")
 }

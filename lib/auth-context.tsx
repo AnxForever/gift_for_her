@@ -2,7 +2,7 @@
 
 import type React from "react"
 import { createContext, useContext, useState, useEffect } from "react"
-import { supabase } from "./supabase"
+import { createClient } from "@/lib/supabase/client"
 import type { User as SupabaseUser } from "@supabase/supabase-js"
 
 interface User {
@@ -33,6 +33,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isLoading, setIsLoading] = useState(true)
 
   useEffect(() => {
+    const supabase = createClient()
+
     const getInitialSession = async () => {
       const {
         data: { session },
@@ -73,6 +75,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = async (email: string, password: string): Promise<{ success: boolean; error?: string }> => {
     setIsLoading(true)
+    const supabase = createClient()
 
     try {
       const { data, error } = await supabase.auth.signInWithPassword({
@@ -109,6 +112,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     displayName: string,
   ): Promise<{ success: boolean; error?: string }> => {
     setIsLoading(true)
+    const supabase = createClient()
 
     try {
       const { data, error } = await supabase.auth.signUp({
@@ -143,6 +147,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   const logout = async () => {
+    const supabase = createClient()
     await supabase.auth.signOut()
     setUser(null)
     setSupabaseUser(null)
