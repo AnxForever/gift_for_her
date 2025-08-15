@@ -8,6 +8,7 @@ import { photoManager, type TravelPhoto } from "@/lib/photo-manager"
 import { usePermissions } from "@/lib/permissions"
 import { useAuth } from "@/lib/auth-context"
 import { EditButton } from "@/components/edit-button"
+import OptimizedImage from "@/components/optimized-image"
 
 interface TravelScrapbookProps {
   initialPhotos?: TravelPhoto[]
@@ -27,7 +28,6 @@ export default function TravelScrapbook({ initialPhotos }: TravelScrapbookProps)
   useEffect(() => {
     setMounted(true)
     if (!initialPhotos && canEdit && supabaseUser) {
-      photoManager.setCurrentUser(supabaseUser.id) // Set current user for PhotoManager
       loadPhotos()
     }
     const checkMobile = () => {
@@ -177,11 +177,12 @@ export default function TravelScrapbook({ initialPhotos }: TravelScrapbookProps)
             >
               <div className={`${getPhotoFrameClass(photo.type)} rounded-lg`}>
                 <div className="relative overflow-hidden rounded">
-                  <img
-                    src={photo.src || "/placeholder.svg"}
+                  <OptimizedImage
+                    src={photo.src}
                     alt={photo.description}
-                    className="w-full h-auto object-cover"
-                    loading="lazy"
+                    width={isMobile ? 200 : 300}
+                    height={isMobile ? 150 : 225}
+                    className="w-full h-auto"
                     style={{
                       filter: photo.type === "film" ? "sepia(20%) contrast(110%)" : "none",
                     }}
@@ -349,11 +350,12 @@ export default function TravelScrapbook({ initialPhotos }: TravelScrapbookProps)
           >
             <div className={`${getPhotoFrameClass(photo.type)} rounded-lg transition-all duration-300`}>
               <div className="relative overflow-hidden rounded">
-                <img
-                  src={photo.src || "/placeholder.svg"}
+                <OptimizedImage
+                  src={photo.src}
                   alt={photo.description}
-                  className="w-full h-full object-cover"
-                  loading="lazy"
+                  width={isMobile ? 200 : 300}
+                  height={isMobile ? 150 : 225}
+                  className="w-full h-auto"
                   style={{
                     filter: photo.type === "film" ? "sepia(20%) contrast(110%)" : "none",
                   }}

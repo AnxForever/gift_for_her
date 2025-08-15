@@ -33,7 +33,6 @@ export default function UserDashboard() {
 
   useEffect(() => {
     if (user && supabaseUser) {
-      photoManager.setCurrentUser(supabaseUser.id)
       loadPhotos()
       loadProfile()
     }
@@ -57,13 +56,25 @@ export default function UserDashboard() {
     }
   }
 
-  const loadProfile = () => {
-    if (user) {
-      setProfileData({
-        avatar: user.avatarUrl || "",
-        bio: user.bio || "",
-        location: user.location || "",
-      })
+  const loadProfile = async () => {
+    if (user && supabaseUser) {
+      try {
+        const { data: profile, error } = await supabase
+          .from("user_profiles")
+          .select("*")
+          .eq("id", supabaseUser.id)
+          .single()
+
+        if (profile && !error) {
+          setProfileData({
+            avatar: profile.avatar_url || "",
+            bio: profile.bio || "",
+            location: profile.location || "",
+          })
+        }
+      } catch (error) {
+        console.error("Error loading profile:", error)
+      }
     }
   }
 
@@ -94,8 +105,8 @@ export default function UserDashboard() {
     const file = e.target.files?.[0]
     if (file && supabaseUser) {
       try {
-        const avatarUrl = await photoManager.uploadPhoto(file, "daily") // Reuse upload logic
-        setProfileData((prev) => ({ ...prev, avatar: avatarUrl }))
+        const { url } = await photoManager.uploadPhoto(file, "daily")
+        setProfileData((prev) => ({ ...prev, avatar: url }))
       } catch (error) {
         console.error("Error uploading avatar:", error)
       }
@@ -206,7 +217,9 @@ export default function UserDashboard() {
               </div>
             ) : (
               <>
-                <h1 className="text-4xl font-serif font-bold text-gray-800 mb-2">Welcome back, {user.displayName}!</h1>
+                <h1 className="text-4xl font-serif font-bold text-gray-800 mb-2">
+                  Welcome back, {user.displayName || user.email}!
+                </h1>
                 {profileData.bio && <p className="text-gray-600 text-lg mb-2">{profileData.bio}</p>}
                 {profileData.location && (
                   <div className="flex items-center justify-center gap-1 text-gray-500 mb-4">

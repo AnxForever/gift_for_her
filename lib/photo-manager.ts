@@ -47,7 +47,6 @@ export type Photo = TravelPhoto | SelfiePhoto | FestivalPhoto | DailyPhoto
 
 class PhotoManager {
   private static instance: PhotoManager
-  private currentUserId: string | null = null
 
   private constructor() {}
 
@@ -65,20 +64,24 @@ class PhotoManager {
       const img = new Image()
 
       img.onload = () => {
-        // Calculate new dimensions - 更激进的尺寸限制
         let { width, height } = img
-        const maxDimension = Math.max(width, height)
 
-        if (maxDimension > maxWidth) {
-          const ratio = maxWidth / maxDimension
-          width = width * ratio
-          height = height * ratio
+        // Calculate new dimensions maintaining aspect ratio
+        if (width > height) {
+          if (width > maxWidth) {
+            height = (height * maxWidth) / width
+            width = maxWidth
+          }
+        } else {
+          if (height > maxWidth) {
+            width = (width * maxWidth) / height
+            height = maxWidth
+          }
         }
 
         canvas.width = width
         canvas.height = height
 
-        // 使用更好的图像质量设置
         if (ctx) {
           ctx.imageSmoothingEnabled = true
           ctx.imageSmoothingQuality = "high"
@@ -88,9 +91,6 @@ class PhotoManager {
         canvas.toBlob(
           (blob) => {
             if (blob) {
-              console.log(
-                `[v0] Image compressed: ${file.size} -> ${blob.size} bytes (${Math.round((1 - blob.size / file.size) * 100)}% reduction)`,
-              )
               resolve(blob)
             } else {
               reject(new Error("Failed to compress image"))
@@ -106,12 +106,32 @@ class PhotoManager {
     })
   }
 
-  setCurrentUser(userId: string | null): void {
-    this.currentUserId = userId
+  private photoCache = new Map<string, { data: Photo[]; timestamp: number }>()
+  private readonly CACHE_DURATION = 5 * 60 * 1000 // 5分钟缓存
+
+  private getCachedPhotos(key: string): Photo[] | null {
+    const cached = this.photoCache.get(key)
+    if (cached && Date.now() - cached.timestamp < this.CACHE_DURATION) {
+      return cached.data
+    }
+    return null
+  }
+
+  private setCachedPhotos(key: string, data: Photo[]): void {
+    this.photoCache.set(key, { data, timestamp: Date.now() })
   }
 
   async getAllPhotos(): Promise<Photo[]> {
-    if (!this.currentUserId) {
+    const cacheKey = "all-photos"
+    const cached = this.getCachedPhotos(cacheKey)
+    if (cached) return cached
+
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser()
+
+    if (authError || !user) {
       return []
     }
 
@@ -119,7 +139,7 @@ class PhotoManager {
       const { data, error } = await supabase
         .from("photos")
         .select("*")
-        .eq("user_id", this.currentUserId)
+        .eq("user_id", user.id)
         .order("created_at", { ascending: false })
 
       if (error) {
@@ -127,7 +147,9 @@ class PhotoManager {
         return []
       }
 
-      return this.mapDatabasePhotosToPhotos(data || [])
+      const photos = this.mapDatabasePhotosToPhotos(data || [])
+      this.setCachedPhotos(cacheKey, photos)
+      return photos
     } catch (error) {
       console.error("Error fetching photos:", error)
       return []
@@ -135,7 +157,16 @@ class PhotoManager {
   }
 
   async getPhotosByCategory<T extends Photo>(category: Photo["category"]): Promise<T[]> {
-    if (!this.currentUserId) {
+    const cacheKey = `category-${category}`
+    const cached = this.getCachedPhotos(cacheKey)
+    if (cached) return cached as T[]
+
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser()
+
+    if (authError || !user) {
       return []
     }
 
@@ -143,7 +174,7 @@ class PhotoManager {
       const { data, error } = await supabase
         .from("photos")
         .select("*")
-        .eq("user_id", this.currentUserId)
+        .eq("user_id", user.id)
         .eq("category", category)
         .order("created_at", { ascending: false })
 
@@ -152,7 +183,9 @@ class PhotoManager {
         return []
       }
 
-      return this.mapDatabasePhotosToPhotos(data || []) as T[]
+      const photos = this.mapDatabasePhotosToPhotos(data || []) as T[]
+      this.setCachedPhotos(cacheKey, photos)
+      return photos
     } catch (error) {
       console.error("Error fetching photos by category:", error)
       return []
@@ -248,118 +281,110 @@ class PhotoManager {
   }
 
   async addPhoto(photo: Omit<Photo, "id" | "userId">, storagePath?: string): Promise<Photo | null> {
-    if (!this.currentUserId) {
-      throw new Error("No user logged in")
-    }
-
     try {
-      // Prepare tags based on photo category
-      let tags: string[] = []
-      switch (photo.category) {
-        case "travel":
-          const travelPhoto = photo as Omit<TravelPhoto, "id" | "userId">
-          tags = [travelPhoto.type]
-          break
-        case "selfie":
-          const selfiePhoto = photo as Omit<SelfiePhoto, "id" | "userId">
-          tags = [selfiePhoto.season]
-          break
-        case "festival":
-          const festivalPhoto = photo as Omit<FestivalPhoto, "id" | "userId">
-          tags = [festivalPhoto.festival, festivalPhoto.color, festivalPhoto.icon, ...festivalPhoto.memories]
-          break
-        case "daily":
-          const dailyPhoto = photo as Omit<DailyPhoto, "id" | "userId">
-          tags = [dailyPhoto.time]
-          break
+      const { data: authData, error: authError } = await supabase.auth.getUser()
+
+      if (authError || !authData?.user) {
+        throw new Error("请先登录后再上传照片")
       }
 
-      // Provide default values for title and description
-      const title =
-        photo.title || `${photo.category.charAt(0).toUpperCase() + photo.category.slice(1)} Moment ${Date.now()}`
-      const description = photo.description || `A beautiful ${photo.category} moment`
+      const user = authData.user
+      const finalStoragePath = storagePath || photo.src || `fallback/${Date.now()}`
 
-      const { data, error } = await supabase
-        .from("photos")
-        .insert({
-          user_id: this.currentUserId,
-          category: photo.category,
-          title: title,
-          description: description,
-          image_url: photo.src,
-          storage_path: storagePath || photo.src,
-          tags,
-          location: "location" in photo ? photo.location : null,
-          mood: "mood" in photo ? photo.mood : null,
-        })
-        .select()
-        .single()
+      // Prepare data for database
+      const photoData = {
+        user_id: user.id,
+        category: photo.category,
+        title: photo.title || `${photo.category} 照片`,
+        description: photo.description || "",
+        image_url: photo.src,
+        storage_path: finalStoragePath,
+        tags: this.extractTags(photo),
+        location: this.extractLocation(photo),
+        mood: this.extractMood(photo),
+        created_at: new Date().toISOString(),
+      }
+
+      const { data, error } = await supabase.from("photos").insert(photoData).select().single()
 
       if (error) {
-        console.error("Error adding photo:", error)
-        throw new Error(`Error adding photo: ${error.message}`)
+        throw new Error(`保存失败: ${error.message}`)
       }
+
+      // Clear related cache
+      this.photoCache.delete("all-photos")
+      this.photoCache.delete(`category-${photo.category}`)
 
       return this.mapDatabasePhotosToPhotos([data])[0]
     } catch (error) {
-      console.error("Error adding photo:", error)
-      throw error
+      throw error instanceof Error ? error : new Error("保存照片失败")
     }
   }
 
   async uploadPhoto(file: File, category: Photo["category"]): Promise<{ url: string; storagePath: string }> {
-    if (!this.currentUserId) {
-      throw new Error("No user logged in")
-    }
-
     try {
-      console.log(`[v0] Starting upload for file: ${file.name}, size: ${file.size} bytes`)
+      const { data: authData, error: authError } = await supabase.auth.getUser()
 
-      // 更激进的压缩设置
+      if (authError || !authData?.user) {
+        throw new Error("请先登录后再上传照片")
+      }
+
+      const user = authData.user
+
+      // Validate file type
+      if (!file.type.startsWith("image/")) {
+        throw new Error("请选择图片文件")
+      }
+
+      // Validate file size (max 10MB)
+      if (file.size > 10 * 1024 * 1024) {
+        throw new Error("图片文件不能超过10MB")
+      }
+
+      // Compress image with optimized settings
       const compressedBlob = await this.compressImage(file, 600, 0.7)
-      console.log(`[v0] Image compressed successfully`)
 
       // Generate unique filename
-      const fileExt = file.name.split(".").pop() || "jpg"
-      const fileName = `${Date.now()}-${Math.random().toString(36).substring(2)}.${fileExt}`
-      const filePath = `${this.currentUserId}/${fileName}`
+      const timestamp = Date.now()
+      const randomStr = Math.random().toString(36).substring(2, 8)
+      const fileName = `${timestamp}-${randomStr}.jpg`
+      const filePath = `${user.id}/${category}/${fileName}`
 
-      console.log(`[v0] Uploading to path: ${filePath}`)
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from("photos")
+        .upload(filePath, compressedBlob, {
+          contentType: "image/jpeg",
+          upsert: false,
+        })
 
-      // Upload to Supabase Storage with better error handling
-      const { data, error } = await supabase.storage.from("photos").upload(filePath, compressedBlob, {
-        contentType: "image/jpeg", // 强制使用JPEG格式
-        upsert: false,
-        cacheControl: "3600", // 1小时缓存
-      })
-
-      if (error) {
-        console.error("[v0] Storage upload error:", error)
-        throw new Error(`上传失败: ${error.message}`)
+      if (uploadError) {
+        throw new Error(`上传失败: ${uploadError.message}`)
       }
-
-      console.log(`[v0] Upload successful, path: ${data.path}`)
 
       // Get public URL
-      const {
-        data: { publicUrl },
-      } = supabase.storage.from("photos").getPublicUrl(data.path)
+      const { data: urlData } = supabase.storage.from("photos").getPublicUrl(uploadData.path)
 
-      console.log(`[v0] Public URL generated: ${publicUrl}`)
+      // Clear related cache
+      this.photoCache.delete("all-photos")
+      this.photoCache.delete(`category-${category}`)
 
       return {
-        url: publicUrl,
-        storagePath: data.path,
+        url: urlData.publicUrl,
+        storagePath: uploadData.path,
       }
     } catch (error) {
-      console.error("[v0] Upload failed:", error)
-      throw new Error("上传失败，请检查网络连接后重试")
+      throw error instanceof Error ? error : new Error("上传失败")
     }
   }
 
   async updatePhoto(id: string, updates: Partial<Photo>): Promise<Photo | null> {
-    if (!this.currentUserId) {
-      throw new Error("No user logged in")
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser()
+
+    if (authError || !user) {
+      throw new Error("请先登录后再编辑照片")
     }
 
     try {
@@ -371,7 +396,7 @@ class PhotoManager {
           image_url: updates.src,
         })
         .eq("id", id)
-        .eq("user_id", this.currentUserId)
+        .eq("user_id", user.id)
         .select()
         .single()
 
@@ -388,68 +413,86 @@ class PhotoManager {
   }
 
   async deletePhoto(id: string): Promise<boolean> {
-    if (!this.currentUserId) {
-      throw new Error("No user logged in")
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser()
+
+    if (authError || !user) {
+      throw new Error("请先登录后再删除照片")
     }
 
     try {
-      console.log(`[v0] Attempting to delete photo with ID: ${id}`)
-
-      // First get the photo to get the storage path for deletion
       const { data: photo, error: fetchError } = await supabase
         .from("photos")
         .select("storage_path, image_url")
         .eq("id", id)
-        .eq("user_id", this.currentUserId)
+        .eq("user_id", user.id)
         .single()
 
       if (fetchError) {
-        console.error("[v0] Error fetching photo for deletion:", fetchError)
+        console.error("Error fetching photo for deletion:", fetchError)
         throw new Error("找不到要删除的照片")
       }
 
-      console.log(`[v0] Found photo to delete:`, photo)
-
-      // Delete from database first
-      const { error: deleteError } = await supabase
-        .from("photos")
-        .delete()
-        .eq("id", id)
-        .eq("user_id", this.currentUserId)
+      const { error: deleteError } = await supabase.from("photos").delete().eq("id", id).eq("user_id", user.id)
 
       if (deleteError) {
-        console.error("[v0] Error deleting photo from database:", deleteError)
+        console.error("Error deleting photo from database:", deleteError)
         throw new Error("删除照片记录失败")
       }
 
-      console.log(`[v0] Photo deleted from database successfully`)
-
-      // Delete from storage if we have a storage path
       if (photo?.storage_path) {
-        console.log(`[v0] Deleting from storage: ${photo.storage_path}`)
         const { error: storageError } = await supabase.storage.from("photos").remove([photo.storage_path])
 
         if (storageError) {
-          console.error("[v0] Error deleting from storage:", storageError)
-          // Don't throw here as the database record is already deleted
-        } else {
-          console.log(`[v0] File deleted from storage successfully`)
+          console.error("Error deleting from storage:", storageError)
         }
       }
 
       return true
     } catch (error) {
-      console.error("[v0] Delete operation failed:", error)
+      console.error("Delete operation failed:", error)
       throw error
     }
   }
 
-  getCurrentUserId(): string | null {
-    return this.currentUserId
+  private extractTags(photo: Omit<Photo, "id" | "userId">): string[] {
+    switch (photo.category) {
+      case "travel":
+        const travelPhoto = photo as Omit<TravelPhoto, "id" | "userId">
+        return [travelPhoto.type || "polaroid"]
+      case "selfie":
+        const selfiePhoto = photo as Omit<SelfiePhoto, "id" | "userId">
+        return [selfiePhoto.season || "spring"]
+      case "festival":
+        const festivalPhoto = photo as Omit<FestivalPhoto, "id" | "userId">
+        return [
+          festivalPhoto.festival || "celebration",
+          festivalPhoto.color || "pink",
+          festivalPhoto.icon || "🎉",
+          ...(festivalPhoto.memories || []),
+        ]
+      case "daily":
+        const dailyPhoto = photo as Omit<DailyPhoto, "id" | "userId">
+        return [dailyPhoto.time || "morning"]
+      default:
+        return []
+    }
   }
 
-  clearPhotos(): void {
-    this.currentUserId = null
+  private extractLocation(photo: Omit<Photo, "id" | "userId">): string | null {
+    if ("location" in photo) {
+      return photo.location || null
+    }
+    return null
+  }
+
+  private extractMood(photo: Omit<Photo, "id" | "userId">): string | null {
+    if ("mood" in photo) {
+      return photo.mood || null
+    }
+    return null
   }
 }
 

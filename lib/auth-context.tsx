@@ -9,6 +9,7 @@ interface User {
   id: string
   email: string
   createdAt: string
+  displayName?: string
 }
 
 interface AuthContextType {
@@ -32,6 +33,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [supabaseUser, setSupabaseUser] = useState<SupabaseUser | null>(null)
   const [isLoading, setIsLoading] = useState(true)
 
+  const fetchUserProfile = async (userId: string) => {
+    const supabase = createClient()
+    console.log("[v0] Fetching user profile for userId:", userId)
+    const { data: profile, error } = await supabase
+      .from("user_profiles")
+      .select("display_name")
+      .eq("id", userId)
+      .single()
+
+    console.log("[v0] Profile data:", profile)
+    console.log("[v0] Profile error:", error)
+
+    return profile?.display_name || null
+  }
+
   useEffect(() => {
     const supabase = createClient()
 
@@ -41,28 +57,33 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } = await supabase.auth.getSession()
       if (session?.user) {
         setSupabaseUser(session.user)
-        setUser({
+        const displayName = await fetchUserProfile(session.user.id)
+        const userData = {
           id: session.user.id,
           email: session.user.email || "",
           createdAt: session.user.created_at,
-        })
+          displayName: displayName || undefined,
+        }
+        setUser(userData)
       }
       setIsLoading(false)
     }
 
     getInitialSession()
 
-    // Listen for auth changes
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (session?.user) {
         setSupabaseUser(session.user)
-        setUser({
+        const displayName = await fetchUserProfile(session.user.id)
+        const userData = {
           id: session.user.id,
           email: session.user.email || "",
           createdAt: session.user.created_at,
-        })
+          displayName: displayName || undefined,
+        }
+        setUser(userData)
       } else {
         setSupabaseUser(null)
         setUser(null)
@@ -90,11 +111,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       if (data.user) {
         setSupabaseUser(data.user)
-        setUser({
+        const displayName = await fetchUserProfile(data.user.id)
+        const userData = {
           id: data.user.id,
           email: data.user.email || "",
           createdAt: data.user.created_at,
-        })
+          displayName: displayName || undefined,
+        }
+        setUser(userData)
       }
 
       setIsLoading(false)
@@ -130,11 +154,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       if (data.user) {
         setSupabaseUser(data.user)
-        setUser({
+        const userData = {
           id: data.user.id,
           email: data.user.email || "",
           createdAt: data.user.created_at,
-        })
+          displayName: displayName || undefined,
+        }
+        setUser(userData)
       }
 
       setIsLoading(false)

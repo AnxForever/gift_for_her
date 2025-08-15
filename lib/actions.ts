@@ -51,6 +51,16 @@ export async function signUp(prevState: any, formData: FormData) {
   const supabase = createClient()
 
   try {
+    const { data: existingUser } = await supabase
+      .from("user_profiles")
+      .select("username")
+      .eq("username", username.toString())
+      .single()
+
+    if (existingUser) {
+      return { error: "Username already exists" }
+    }
+
     const { data, error } = await supabase.auth.signUp({
       email: email.toString(),
       password: password.toString(),
@@ -63,6 +73,19 @@ export async function signUp(prevState: any, formData: FormData) {
 
     if (error) {
       return { error: error.message }
+    }
+
+    if (data.user) {
+      const { error: profileError } = await supabase.from("user_profiles").insert({
+        id: data.user.id,
+        username: username.toString(),
+        display_name: displayName.toString(),
+      })
+
+      if (profileError) {
+        console.error("Error creating user profile:", profileError)
+        // 不返回错误，因为用户已经创建成功
+      }
     }
 
     return { success: "Check your email to confirm your account." }

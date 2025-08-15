@@ -29,7 +29,6 @@ export default function TimelineSelfieGallery() {
   useEffect(() => {
     setMounted(true)
     if (canEdit && supabaseUser) {
-      photoManager.setCurrentUser(supabaseUser.id)
       loadPhotos()
     }
   }, [canEdit, supabaseUser])

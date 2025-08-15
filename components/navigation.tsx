@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Heart, Camera, User, MessageCircle, Home, LogOut, Share2 } from "lucide-react"
@@ -22,9 +22,7 @@ export default function Navigation() {
   const { user, logout } = useAuth()
   const router = useRouter()
 
-  useEffect(() => {
-    photoManager.setCurrentUser(user?.id || null)
-  }, [user])
+  // PhotoManager now uses supabase.auth.getUser() directly for authentication
 
   const handleLogout = () => {
     logout()
