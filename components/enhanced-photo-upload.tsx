@@ -2,7 +2,7 @@
 
 import type React from "react"
 import { useState, useRef, useCallback } from "react"
-import { Upload, Check, AlertCircle, ImageIcon, Plus, Trash2, Heart, Sparkles } from "lucide-react"
+import { Upload, Check, AlertCircle, ImageIcon, Plus, Trash2, Heart, X, Camera } from "lucide-react"
 import { photoUploadManager, type UploadProgress } from "@/lib/photo-upload-manager"
 import { photoManager, type Photo } from "@/lib/photo-manager"
 
@@ -24,11 +24,13 @@ export default function EnhancedPhotoUpload({
   const [isDragOver, setIsDragOver] = useState(false)
   const [uploadQueue, setUploadQueue] = useState<UploadProgress[]>([])
   const [isUploading, setIsUploading] = useState(false)
+  const [isExpanded, setIsExpanded] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault()
     setIsDragOver(true)
+    setIsExpanded(true) // Auto-expand on drag over
   }, [])
 
   const handleDragLeave = useCallback((e: React.DragEvent) => {
@@ -124,8 +126,8 @@ export default function EnhancedPhotoUpload({
         onUploadComplete?.(results)
       }, 100)
 
-      // Clear completed uploads after delay
       setTimeout(() => {
+        setIsExpanded(false)
         setUploadQueue((prev) => prev.filter((p) => p.status !== "completed"))
       }, 3000)
     } catch (error) {
@@ -150,175 +152,172 @@ export default function EnhancedPhotoUpload({
   const getStatusIcon = (status: UploadProgress["status"]) => {
     switch (status) {
       case "completed":
-        return <Check className="w-4 h-4 text-green-500" />
+        return <Check className="w-3 h-3 text-green-500" />
       case "error":
-        return <AlertCircle className="w-4 h-4 text-red-500" />
+        return <AlertCircle className="w-3 h-3 text-red-500" />
       case "uploading":
       case "processing":
-        return <Upload className="w-4 h-4 text-pink-500 animate-pulse" />
+        return <Upload className="w-3 h-3 text-pink-500 animate-pulse" />
       default:
-        return <ImageIcon className="w-4 h-4 text-pink-300" />
+        return <ImageIcon className="w-3 h-3 text-pink-300" />
     }
   }
 
   return (
-    <div className={`space-y-4 ${className}`}>
-      <div
-        className={`
-          relative border-2 border-dashed rounded-2xl p-6 sm:p-8 text-center transition-all duration-300 cursor-pointer
-          ${
-            isDragOver
-              ? "border-pink-400 bg-gradient-to-br from-pink-50 to-purple-50 shadow-lg scale-[1.02]"
-              : "border-pink-200 bg-gradient-to-br from-white/60 to-pink-50/40 hover:border-pink-300 hover:shadow-md"
-          }
-          ${isUploading ? "opacity-70 pointer-events-none" : ""}
-          backdrop-blur-sm glass-card floating-animation
-        `}
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
-        onDrop={handleDrop}
-        onClick={() => fileInputRef.current?.click()}
-      >
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="image/*"
-          multiple
-          onChange={handleFileInputChange}
-          className="hidden"
-          disabled={isUploading}
-        />
+    <div className={`${className}`}>
+      {!isExpanded && (
+        <button
+          onClick={() => setIsExpanded(true)}
+          className="fixed bottom-6 right-6 z-50 w-12 h-12 sm:w-14 sm:h-14 bg-gradient-to-br from-pink-400 to-purple-400 text-white rounded-full shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-110 touch-manipulation group"
+          aria-label="添加照片"
+        >
+          <Camera className="w-5 h-5 sm:w-6 sm:h-6 mx-auto" />
+          <Heart className="absolute -top-1 -right-1 w-3 h-3 text-pink-200 animate-pulse opacity-0 group-hover:opacity-100 transition-opacity" />
+        </button>
+      )}
 
-        <div className="space-y-4">
-          <div className="flex justify-center relative">
-            <div
-              className={`
-              w-16 h-16 sm:w-20 sm:h-20 rounded-full flex items-center justify-center transition-all duration-300 relative
-              ${
-                isDragOver
-                  ? "bg-gradient-to-br from-pink-400 to-purple-400 shadow-lg scale-110"
-                  : "bg-gradient-to-br from-pink-300 to-purple-300 shadow-md hover:scale-105"
-              }
-            `}
-            >
-              <Upload className={`w-8 h-8 sm:w-10 sm:h-10 text-white ${isDragOver ? "animate-bounce" : ""}`} />
-
-              <Heart className="absolute -top-2 -right-2 w-4 h-4 text-pink-400 animate-pulse" />
-              <Sparkles
-                className="absolute -bottom-1 -left-2 w-3 h-3 text-purple-400 animate-pulse"
-                style={{ animationDelay: "0.5s" }}
-              />
+      {isExpanded && (
+        <div className="fixed inset-0 z-50 bg-black/20 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between p-4 border-b border-pink-100">
+              <h3 className="font-serif font-semibold text-gray-700 flex items-center gap-2">
+                <Camera className="w-5 h-5 text-pink-500" />
+                添加美好瞬间
+              </h3>
+              <button
+                onClick={() => setIsExpanded(false)}
+                className="p-2 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100 transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
             </div>
-          </div>
 
-          <div>
-            <p className="text-lg sm:text-xl font-serif font-semibold text-gray-700 mb-2">
-              {isDragOver ? "✨ 释放创造美好回忆 ✨" : "📸 分享你的美好瞬间"}
-            </p>
-            <p className="text-sm text-gray-500 leading-relaxed">
-              支持 JPG、PNG、GIF、WebP 格式
-              <br />
-              最大 50MB，最多 {maxFiles} 张照片
-            </p>
-          </div>
+            <div className="p-4">
+              <div
+                className={`
+                  relative border-2 border-dashed rounded-xl p-4 text-center transition-all duration-300 cursor-pointer
+                  ${
+                    isDragOver
+                      ? "border-pink-400 bg-gradient-to-br from-pink-50 to-purple-50 shadow-md"
+                      : "border-pink-200 bg-gradient-to-br from-white/60 to-pink-50/40 hover:border-pink-300"
+                  }
+                  ${isUploading ? "opacity-70 pointer-events-none" : ""}
+                `}
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  onChange={handleFileInputChange}
+                  className="hidden"
+                  disabled={isUploading}
+                />
 
-          <button
-            type="button"
-            className={`
-              inline-flex items-center gap-2 px-6 py-3 rounded-full font-medium transition-all duration-300 touch-manipulation
-              ${
-                isDragOver
-                  ? "bg-gradient-to-r from-pink-500 to-purple-500 text-white shadow-lg scale-105"
-                  : "glass-pink text-white hover:shadow-lg hover:scale-105"
-              }
-              disabled:opacity-50 disabled:cursor-not-allowed
-            `}
-            disabled={isUploading}
-          >
-            <Plus className="w-4 h-4" />
-            <span>{isUploading ? "上传中..." : "选择美好照片"}</span>
-          </button>
-        </div>
-
-        {isUploading && (
-          <div className="absolute inset-0 bg-white/20 backdrop-blur-sm rounded-2xl flex items-center justify-center">
-            <div className="text-center">
-              <div className="w-8 h-8 border-3 border-pink-300 border-t-pink-500 rounded-full animate-spin mx-auto mb-2"></div>
-              <p className="text-sm text-pink-600 font-medium">正在处理您的美好回忆...</p>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {uploadQueue.length > 0 && (
-        <div className="space-y-3">
-          <div className="flex items-center gap-2">
-            <Heart className="w-5 h-5 text-pink-500" />
-            <h4 className="font-serif font-semibold text-gray-700">上传进度</h4>
-          </div>
-          <div className="space-y-3 max-h-60 overflow-y-auto">
-            {uploadQueue.map((upload) => (
-              <div key={upload.id} className="glass-card p-4 rounded-xl border border-pink-100">
-                <div className="flex items-center gap-3">
-                  {/* Preview thumbnail with romantic border */}
-                  {upload.preview && (
-                    <div className="relative">
-                      <img
-                        src={upload.preview || "/placeholder.svg"}
-                        alt="Preview"
-                        className="w-12 h-12 object-cover rounded-lg border-2 border-pink-200"
-                      />
-                      <div className="absolute -top-1 -right-1">{getStatusIcon(upload.status)}</div>
-                    </div>
-                  )}
-
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between mb-2">
-                      <p className="text-sm font-medium text-gray-700 truncate">{upload.file.name}</p>
-                      <span className="text-xs text-pink-500 font-medium">{upload.progress.toFixed(0)}%</span>
-                    </div>
-
-                    <div className="w-full bg-pink-100 rounded-full h-2 overflow-hidden">
-                      <div
-                        className={`h-2 rounded-full transition-all duration-300 ${
-                          upload.status === "error"
-                            ? "bg-red-400"
-                            : upload.status === "completed"
-                              ? "bg-gradient-to-r from-green-400 to-green-500"
-                              : "bg-gradient-to-r from-pink-400 to-purple-400"
-                        }`}
-                        style={{ width: `${upload.progress}%` }}
-                      />
-                    </div>
-
-                    {upload.error && <p className="text-xs text-red-500 mt-1">{upload.error}</p>}
-
-                    <div className="flex items-center justify-between mt-2">
-                      <span className="text-xs text-gray-500 font-medium">
-                        {upload.status === "uploading"
-                          ? "✨ 上传中..."
-                          : upload.status === "processing"
-                            ? "🎨 处理中..."
-                            : upload.status === "completed"
-                              ? "💖 完成"
-                              : upload.status === "error"
-                                ? "❌ 失败"
-                                : "⏳ 等待中..."}
-                      </span>
-                      <span className="text-xs text-gray-400">{(upload.file.size / 1024 / 1024).toFixed(1)} MB</span>
+                <div className="space-y-3">
+                  <div className="flex justify-center">
+                    <div
+                      className={`
+                      w-12 h-12 rounded-full flex items-center justify-center transition-all duration-300
+                      ${
+                        isDragOver
+                          ? "bg-gradient-to-br from-pink-400 to-purple-400 scale-110"
+                          : "bg-gradient-to-br from-pink-300 to-purple-300 hover:scale-105"
+                      }
+                    `}
+                    >
+                      <Upload className={`w-5 h-5 text-white ${isDragOver ? "animate-bounce" : ""}`} />
                     </div>
                   </div>
 
+                  <div>
+                    <p className="text-base font-serif font-semibold text-gray-700 mb-1">
+                      {isDragOver ? "释放添加照片" : "选择或拖拽照片"}
+                    </p>
+                    <p className="text-xs text-gray-500">支持 JPG、PNG 等格式，最大 50MB</p>
+                  </div>
+
                   <button
-                    onClick={() => removeFromQueue(upload.id)}
-                    className="p-2 text-gray-400 hover:text-red-400 transition-colors rounded-full hover:bg-red-50 touch-manipulation"
-                    disabled={upload.status === "uploading"}
+                    type="button"
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium bg-gradient-to-r from-pink-400 to-purple-400 text-white hover:shadow-md hover:scale-105 transition-all duration-300 disabled:opacity-50"
+                    disabled={isUploading}
                   >
-                    <Trash2 className="w-4 h-4" />
+                    <Plus className="w-3 h-3" />
+                    <span>{isUploading ? "上传中..." : "选择照片"}</span>
                   </button>
                 </div>
+
+                {isUploading && (
+                  <div className="absolute inset-0 bg-white/80 backdrop-blur-sm rounded-xl flex items-center justify-center">
+                    <div className="text-center">
+                      <div className="w-6 h-6 border-2 border-pink-300 border-t-pink-500 rounded-full animate-spin mx-auto mb-2"></div>
+                      <p className="text-xs text-pink-600 font-medium">处理中...</p>
+                    </div>
+                  </div>
+                )}
               </div>
-            ))}
+
+              {uploadQueue.length > 0 && (
+                <div className="mt-4 space-y-2">
+                  <h4 className="text-sm font-medium text-gray-700 flex items-center gap-1">
+                    <Heart className="w-4 h-4 text-pink-500" />
+                    上传进度
+                  </h4>
+                  <div className="space-y-2 max-h-40 overflow-y-auto">
+                    {uploadQueue.map((upload) => (
+                      <div key={upload.id} className="bg-pink-50 p-3 rounded-lg border border-pink-100">
+                        <div className="flex items-center gap-2">
+                          {upload.preview && (
+                            <div className="relative">
+                              <img
+                                src={upload.preview || "/placeholder.svg"}
+                                alt="Preview"
+                                className="w-8 h-8 object-cover rounded border border-pink-200"
+                              />
+                              <div className="absolute -top-1 -right-1">{getStatusIcon(upload.status)}</div>
+                            </div>
+                          )}
+
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between mb-1">
+                              <p className="text-xs font-medium text-gray-700 truncate">{upload.file.name}</p>
+                              <span className="text-xs text-pink-500">{upload.progress.toFixed(0)}%</span>
+                            </div>
+
+                            <div className="w-full bg-pink-100 rounded-full h-1.5">
+                              <div
+                                className={`h-1.5 rounded-full transition-all duration-300 ${
+                                  upload.status === "error"
+                                    ? "bg-red-400"
+                                    : upload.status === "completed"
+                                      ? "bg-green-400"
+                                      : "bg-gradient-to-r from-pink-400 to-purple-400"
+                                }`}
+                                style={{ width: `${upload.progress}%` }}
+                              />
+                            </div>
+
+                            {upload.error && <p className="text-xs text-red-500 mt-1">{upload.error}</p>}
+                          </div>
+
+                          <button
+                            onClick={() => removeFromQueue(upload.id)}
+                            className="p-1 text-gray-400 hover:text-red-400 transition-colors rounded"
+                            disabled={upload.status === "uploading"}
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
