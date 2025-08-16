@@ -1,7 +1,9 @@
 "use client"
-import EnhancedPhotoUpload from "@/components/enhanced-photo-upload"
+
+import type React from "react"
+
 import { useState, useEffect } from "react"
-import { MapPin, Plane, Camera, Heart, Star, Edit, Trash2, Save, X } from "lucide-react"
+import { MapPin, Plane, Camera, Heart, Star, Edit, Upload, Trash2, Save, X } from "lucide-react"
 import { photoManager, type TravelPhoto } from "@/lib/photo-manager"
 import { usePermissions } from "@/lib/permissions"
 import { useAuth } from "@/lib/auth-context"
@@ -47,16 +49,37 @@ export default function TravelScrapbook({ initialPhotos }: TravelScrapbookProps)
     }
   }
 
-  const handleUploadComplete = async (results: { url: string; storagePath: string }[]) => {
-    console.log(`[v0] Successfully uploaded ${results.length} photos`)
-    await loadPhotos() // Reload photos after upload
-    setIsUploading(false)
-  }
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (!canEdit || !supabaseUser) return
 
-  const handleUploadError = (error: string) => {
-    console.error("[v0] Upload error:", error)
-    alert(`上传失败: ${error}`)
-    setIsUploading(false)
+    const file = event.target.files?.[0]
+    if (!file) return
+
+    setIsUploading(true)
+    try {
+      const { url, storagePath } = await photoManager.uploadPhoto(file, "travel")
+
+      const newPhoto: Omit<TravelPhoto, "id" | "userId"> = {
+        src: url, // Use the URL from the upload result
+        title: "New Travel Photo",
+        description: "Add description...",
+        date: new Date().toISOString().split("T")[0],
+        category: "travel",
+        location: "New Location",
+        rotation: Math.random() * 20 - 10,
+        scale: 0.9 + Math.random() * 0.2,
+        x: Math.random() * 80,
+        y: Math.random() * 80,
+        type: "polaroid",
+      }
+
+      await photoManager.addPhoto(newPhoto, storagePath)
+      await loadPhotos() // Reload photos after adding
+    } catch (error) {
+      console.error("Upload failed:", error)
+    } finally {
+      setIsUploading(false)
+    }
   }
 
   const handleDeletePhoto = async (id: string) => {
@@ -125,14 +148,19 @@ export default function TravelScrapbook({ initialPhotos }: TravelScrapbookProps)
         </div>
 
         {isEditMode && canEdit && (
-          <div className="mb-6">
-            <EnhancedPhotoUpload
-              category="travel"
-              onUploadComplete={handleUploadComplete}
-              onUploadError={handleUploadError}
-              maxFiles={5}
-              className="max-w-sm mx-auto"
-            />
+          <div className="mb-6 text-center">
+            <label className="inline-flex items-center gap-2 px-4 py-2 bg-pink-500 hover:bg-pink-600 text-white rounded-full cursor-pointer transition-colors">
+              <Upload className="w-4 h-4" />
+              <span className="text-sm">Add Photo</span>
+              <input
+                type="file"
+                accept="image/*"
+                onChange={handleFileUpload}
+                className="hidden"
+                disabled={isUploading}
+              />
+            </label>
+            {isUploading && <div className="mt-2 text-sm text-gray-600">Uploading...</div>}
           </div>
         )}
 
@@ -253,13 +281,19 @@ export default function TravelScrapbook({ initialPhotos }: TravelScrapbookProps)
         />
 
         {isEditMode && canEdit && (
-          <div className="mt-4 max-w-2xl mx-auto">
-            <EnhancedPhotoUpload
-              category="travel"
-              onUploadComplete={handleUploadComplete}
-              onUploadError={handleUploadError}
-              maxFiles={10}
-            />
+          <div className="mt-4">
+            <label className="inline-flex items-center gap-2 px-6 py-3 bg-orange-500 hover:bg-orange-600 text-white rounded-full cursor-pointer transition-colors">
+              <Upload className="w-5 h-5" />
+              <span>Add New Photo</span>
+              <input
+                type="file"
+                accept="image/*"
+                onChange={handleFileUpload}
+                className="hidden"
+                disabled={isUploading}
+              />
+            </label>
+            {isUploading && <div className="mt-2 text-gray-600">Uploading...</div>}
           </div>
         )}
       </div>
