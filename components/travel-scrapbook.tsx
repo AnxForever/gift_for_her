@@ -20,6 +20,7 @@ export default function TravelScrapbook({ initialPhotos }: TravelScrapbookProps)
   const [isEditMode, setIsEditMode] = useState(false)
   const [editingPhoto, setEditingPhoto] = useState<TravelPhoto | null>(null)
   const [isUploading, setIsUploading] = useState(false)
+  const [optimisticPhotos, setOptimisticPhotos] = useState<TravelPhoto[]>([])
   const { canEdit } = usePermissions()
   const { supabaseUser } = useAuth() // Added Supabase user for authentication
 
@@ -48,9 +49,29 @@ export default function TravelScrapbook({ initialPhotos }: TravelScrapbookProps)
   }
 
   const handleUploadComplete = async (results: { url: string; storagePath: string }[]) => {
-    console.log(`[v0] Successfully uploaded ${results.length} photos`)
-    await loadPhotos() // Reload photos after upload
-    setIsUploading(false)
+    console.log(`[v0] Travel upload complete:`, results)
+
+    if (results.some((r) => r.storagePath === "temp")) {
+      const newOptimisticPhotos = results.map((result, index) => ({
+        id: `optimistic_${Date.now()}_${index}`,
+        src: result.url,
+        title: `Travel Photo ${Date.now()}`,
+        description: "New adventure captured",
+        date: new Date().toISOString().split("T")[0],
+        location: "New Location",
+        rotation: Math.random() * 20 - 10,
+        scale: 0.9 + Math.random() * 0.2,
+        x: Math.random() * 80,
+        y: Math.random() * 80,
+        type: "polaroid" as const,
+        category: "travel" as const,
+      }))
+
+      setOptimisticPhotos((prev) => [...prev, ...newOptimisticPhotos])
+    } else {
+      setOptimisticPhotos([])
+      await loadPhotos()
+    }
   }
 
   const handleUploadError = (error: string) => {
@@ -105,6 +126,8 @@ export default function TravelScrapbook({ initialPhotos }: TravelScrapbookProps)
     }
   }
 
+  const displayPhotos = [...photos, ...optimisticPhotos]
+
   if (isMobile) {
     return (
       <div className="px-4 pb-8">
@@ -138,7 +161,7 @@ export default function TravelScrapbook({ initialPhotos }: TravelScrapbookProps)
 
         {/* Mobile Grid Layout */}
         <div className="grid grid-cols-2 gap-4 max-w-sm mx-auto">
-          {photos.map((photo, index) => (
+          {displayPhotos.map((photo, index) => (
             <div
               key={photo.id}
               className={`${index % 3 === 0 ? "col-span-2" : ""} transform transition-all duration-300 relative`}
@@ -306,7 +329,7 @@ export default function TravelScrapbook({ initialPhotos }: TravelScrapbookProps)
 
       {/* Photo Scrapbook */}
       <div className="relative max-w-6xl mx-auto" style={{ height: "80vh" }}>
-        {photos.map((photo) => (
+        {displayPhotos.map((photo) => (
           <div
             key={photo.id}
             className="absolute cursor-pointer transition-all duration-300 hover:z-20"

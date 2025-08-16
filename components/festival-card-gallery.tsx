@@ -1,18 +1,10 @@
 "use client"
 import { useState, useEffect } from "react"
-import { Camera, Edit3, Plus, X, Heart } from "lucide-react"
-import { PhotoManager } from "@/lib/photo-manager"
+import { Camera, Edit3, X, Heart } from "lucide-react"
+import { photoManager, type FestivalPhoto } from "@/lib/photo-manager"
+import { usePermissions } from "@/lib/permissions"
+import { useAuth } from "@/lib/auth-context"
 import EnhancedPhotoUpload from "./enhanced-photo-upload"
-
-interface FestivalPhoto {
-  id: string
-  src: string
-  festival: string
-  date: string
-  title: string
-  description: string
-  memories: string[]
-}
 
 interface FestivalCardGalleryProps {
   initialPhotos?: FestivalPhoto[]
@@ -20,10 +12,13 @@ interface FestivalCardGalleryProps {
 
 export default function FestivalCardGallery({ initialPhotos }: FestivalCardGalleryProps = {}) {
   const [mounted, setMounted] = useState(false)
-  const [festivalPhotos, setFestivalPhotos] = useState<FestivalPhoto[]>([])
+  const [festivalPhotos, setFestivalPhotos] = useState<FestivalPhoto[]>(initialPhotos || [])
   const [isEditMode, setIsEditMode] = useState(false)
   const [editingPhoto, setEditingPhoto] = useState<string | null>(null)
   const [isUploading, setIsUploading] = useState(false)
+  const [optimisticPhotos, setOptimisticPhotos] = useState<FestivalPhoto[]>([])
+  const { canEdit } = usePermissions()
+  const { supabaseUser } = useAuth()
   const [editForm, setEditForm] = useState({
     title: "",
     description: "",
@@ -34,68 +29,59 @@ export default function FestivalCardGallery({ initialPhotos }: FestivalCardGalle
 
   useEffect(() => {
     setMounted(true)
-    if (initialPhotos && initialPhotos.length > 0) {
-      const formattedPhotos: FestivalPhoto[] = initialPhotos.map((photo) => ({
-        id: photo.id,
-        src: photo.src,
-        festival: photo.festival || "Special Day",
-        date: photo.date || "2024",
-        title: photo.title || photo.caption,
-        description: photo.description || photo.caption,
-        memories: photo.memories || ["Beautiful moments", "Sweet memories"],
-      }))
-      setFestivalPhotos(formattedPhotos)
-    } else {
+    if (!initialPhotos && canEdit && supabaseUser) {
       loadPhotos()
     }
-  }, [initialPhotos])
+  }, [initialPhotos, canEdit, supabaseUser])
 
   const loadPhotos = async () => {
-    const photoManager = PhotoManager.getInstance()
-    const photos = await photoManager.getPhotosByCategory("festival")
+    if (!canEdit || !supabaseUser) return
 
-    const formattedPhotos: FestivalPhoto[] = photos.map((photo) => ({
-      id: photo.id,
-      src: photo.src,
-      festival: photo.festival || "Special Day",
-      date: photo.date || "2024",
-      title: photo.title || photo.caption,
-      description: photo.description || photo.caption,
-      memories: photo.memories || ["Beautiful moments", "Sweet memories"],
-    }))
-
-    setFestivalPhotos(formattedPhotos)
+    try {
+      const photos = (await photoManager.getPhotosByCategory("festival")) as FestivalPhoto[]
+      setFestivalPhotos(photos)
+    } catch (error) {
+      console.error("Error loading festival photos:", error)
+    }
   }
 
-  const handlePhotoUpload = async (files: File[]) => {
-    setIsUploading(true)
-    try {
-      const photoManager = PhotoManager.getInstance()
+  const handleUploadComplete = async (results: { url: string; storagePath: string }[]) => {
+    console.log(`[v0] Festival upload complete:`, results)
 
-      for (const file of files) {
-        const newPhoto = {
-          src: URL.createObjectURL(file),
-          caption: "New festival celebration",
-          category: "festival" as const,
-          title: "New Celebration",
-          description: "A beautiful festival moment",
-          festival: "Special Day",
-          date: new Date().toISOString().split("T")[0],
-          memories: ["Beautiful moments", "Sweet memories"],
-        }
-        await photoManager.addPhoto(newPhoto)
-      }
+    if (results.some((r) => r.storagePath === "temp")) {
+      // Optimistic update - add photos immediately to UI
+      const newOptimisticPhotos = results.map((result, index) => ({
+        id: `optimistic_${Date.now()}_${index}`,
+        src: result.url,
+        title: "New Celebration",
+        description: "A beautiful festival moment",
+        date: new Date().toISOString().split("T")[0],
+        category: "festival" as const,
+        festival: "Special Day",
+        color: "pink",
+        icon: "🎉",
+        memories: ["Beautiful moments", "Sweet memories"],
+      }))
 
+      setOptimisticPhotos((prev) => [...prev, ...newOptimisticPhotos])
+    } else {
+      // Real update - clear optimistic photos and reload from server
+      setOptimisticPhotos([])
       await loadPhotos()
-    } finally {
-      setIsUploading(false)
     }
+  }
+
+  const handleUploadError = (error: string) => {
+    console.error("[v0] Festival upload error:", error)
+    alert(`上传失败: ${error}`)
+    setIsUploading(false)
   }
 
   const handleDeletePhoto = async (photoId: string) => {
+    if (!canEdit || !supabaseUser) return
+
     if (confirm("Are you sure you want to delete this photo?")) {
       try {
-        const photoManager = PhotoManager.getInstance()
         await photoManager.deletePhoto(photoId)
         await loadPhotos()
       } catch (error) {
@@ -116,9 +102,10 @@ export default function FestivalCardGallery({ initialPhotos }: FestivalCardGalle
     })
   }
 
-  const savePhotoEdit = () => {
-    if (editingPhoto) {
-      const photoManager = PhotoManager.getInstance()
+  const savePhotoEdit = async () => {
+    if (!editingPhoto || !canEdit || !supabaseUser) return
+
+    try {
       const updateData = {
         title: editForm.title,
         description: editForm.description,
@@ -126,9 +113,11 @@ export default function FestivalCardGallery({ initialPhotos }: FestivalCardGalle
         date: editForm.date,
         memories: editForm.memories.filter((m) => m.trim() !== ""),
       }
-      photoManager.updatePhoto(editingPhoto, updateData)
+      await photoManager.updatePhoto(editingPhoto, updateData)
       setEditingPhoto(null)
-      loadPhotos()
+      await loadPhotos()
+    } catch (error) {
+      console.error("Error updating photo:", error)
     }
   }
 
@@ -149,7 +138,9 @@ export default function FestivalCardGallery({ initialPhotos }: FestivalCardGalle
     return offsets[index % offsets.length]
   }
 
-  if (festivalPhotos.length === 0) {
+  const displayPhotos = [...festivalPhotos, ...optimisticPhotos]
+
+  if (displayPhotos.length === 0) {
     return (
       <div
         className="min-h-screen flex flex-col items-center justify-center p-4"
@@ -166,14 +157,15 @@ export default function FestivalCardGallery({ initialPhotos }: FestivalCardGalle
           <Camera className="w-16 h-16 text-amber-700 mx-auto mb-4" />
           <h2 className="font-serif text-2xl md:text-3xl font-bold text-amber-900 mb-2">No Festival Photos Yet</h2>
           <p className="font-sans text-amber-700 mb-6">Start your vintage photo collection!</p>
-          <EnhancedPhotoUpload
-            onUpload={handlePhotoUpload}
-            category="festival"
-            className="inline-block"
-            buttonClassName="px-6 py-3 bg-amber-800 text-cream rounded-lg font-sans font-medium hover:bg-amber-900 transition-colors shadow-lg"
-            buttonText="Add First Photo"
-            icon={<Plus className="w-5 h-5 inline mr-2" />}
-          />
+          {canEdit && (
+            <EnhancedPhotoUpload
+              category="festival"
+              onUploadComplete={handleUploadComplete}
+              onUploadError={handleUploadError}
+              maxFiles={5}
+              className="inline-block"
+            />
+          )}
         </div>
       </div>
     )
@@ -200,30 +192,30 @@ export default function FestivalCardGallery({ initialPhotos }: FestivalCardGalle
           "A collection of our most cherished celebrations"
         </p>
 
-        <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-          <EnhancedPhotoUpload
-            onUpload={handlePhotoUpload}
-            category="festival"
-            className="inline-block"
-            buttonClassName="px-6 py-3 bg-green-700 text-cream rounded-lg font-sans font-medium hover:bg-green-800 transition-all duration-300 shadow-md"
-            buttonText="Add Photo"
-            icon={<Plus className="w-5 h-5 inline mr-2" />}
-            disabled={isUploading}
-          />
+        {canEdit && (
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
+            <EnhancedPhotoUpload
+              category="festival"
+              onUploadComplete={handleUploadComplete}
+              onUploadError={handleUploadError}
+              maxFiles={5}
+              className="inline-block"
+            />
 
-          <button
-            onClick={() => setIsEditMode(!isEditMode)}
-            className={`px-6 py-3 rounded-lg font-sans font-medium transition-all duration-300 shadow-md ${
-              isEditMode
-                ? "bg-amber-800 text-cream hover:bg-amber-900"
-                : "bg-cream text-amber-800 border-2 border-amber-300 hover:bg-amber-50"
-            }`}
-            disabled={isUploading}
-          >
-            <Edit3 className="w-5 h-5 inline mr-2" />
-            {isEditMode ? "Done Editing" : "Edit Photos"}
-          </button>
-        </div>
+            <button
+              onClick={() => setIsEditMode(!isEditMode)}
+              className={`px-6 py-3 rounded-lg font-sans font-medium transition-all duration-300 shadow-md ${
+                isEditMode
+                  ? "bg-amber-800 text-cream hover:bg-amber-900"
+                  : "bg-cream text-amber-800 border-2 border-amber-300 hover:bg-amber-50"
+              }`}
+              disabled={isUploading}
+            >
+              <Edit3 className="w-5 h-5 inline mr-2" />
+              {isEditMode ? "Done Editing" : "Edit Photos"}
+            </button>
+          </div>
+        )}
       </div>
 
       {isUploading && (
@@ -237,7 +229,7 @@ export default function FestivalCardGallery({ initialPhotos }: FestivalCardGalle
 
       <div className="max-w-7xl mx-auto">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 md:gap-12 lg:gap-16">
-          {festivalPhotos.map((photo, index) => {
+          {displayPhotos.map((photo, index) => {
             const rotation = getRandomRotation(index)
             const offset = getRandomOffset(index)
 
@@ -267,7 +259,7 @@ export default function FestivalCardGallery({ initialPhotos }: FestivalCardGalle
                       style={{ filter: "sepia(10%) contrast(1.1) brightness(1.05)" }}
                     />
 
-                    {isEditMode && (
+                    {isEditMode && canEdit && (
                       <div className="absolute top-2 right-2 flex gap-1">
                         <button
                           onClick={() => startEditPhoto(photo)}

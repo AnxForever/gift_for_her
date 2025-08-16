@@ -61,32 +61,10 @@ export default function EnhancedPhotoUpload({
     const results: { url: string; storagePath: string }[] = []
 
     try {
-      for (const file of files) {
-        const result = await photoUploadManager.uploadSingleFile(file, {
-          category,
-          maxWidth: 1200,
-          quality: 0.85,
-          onProgress: (progress) => {
-            setUploadQueue((prev) => {
-              const existing = prev.find((p) => p.id === progress.id)
-              if (existing) {
-                return prev.map((p) => (p.id === progress.id ? progress : p))
-              } else {
-                return [...prev, progress]
-              }
-            })
-          },
-          onComplete: (result) => {
-            results.push(result)
-          },
-          onError: (error) => {
-            console.error("Upload error:", error)
-            onUploadError?.(error)
-          },
-        })
-
-        const newPhoto = {
-          src: result.url,
+      const optimisticResults = files.map((file, index) => {
+        const optimisticPhoto = {
+          id: `temp_${Date.now()}_${index}`,
+          src: URL.createObjectURL(file),
           title: `${category} Photo ${Date.now()}`,
           description: "New photo upload",
           date: new Date().toISOString().split("T")[0],
@@ -117,24 +95,67 @@ export default function EnhancedPhotoUpload({
           }),
         }
 
+        return { url: optimisticPhoto.src, storagePath: "temp", photo: optimisticPhoto }
+      })
+
+      // Immediately call onUploadComplete with optimistic data
+      onUploadComplete?.(optimisticResults.map((r) => ({ url: r.url, storagePath: r.storagePath })))
+
+      // Now do the actual upload
+      for (const file of files) {
+        const result = await photoUploadManager.uploadSingleFile(file, {
+          category,
+          maxWidth: 1200,
+          quality: 0.85,
+          onProgress: (progress) => {
+            setUploadQueue((prev) => {
+              const existing = prev.find((p) => p.id === progress.id)
+              if (existing) {
+                return prev.map((p) => (p.id === progress.id ? progress : p))
+              } else {
+                return [...prev, progress]
+              }
+            })
+          },
+          onComplete: (result) => {
+            results.push(result)
+          },
+          onError: (error) => {
+            console.error("Upload error:", error)
+            onUploadError?.(error)
+          },
+        })
+
+        const newPhoto = {
+          ...optimisticResults[files.indexOf(file)].photo,
+          src: result.url,
+          id: `photo_${Date.now()}_${Math.random()}`,
+        }
+
         await photoManager.addPhoto(newPhoto as any, result.storagePath)
       }
 
       onUploadComplete?.(results)
 
-      setTimeout(() => {
-        onUploadComplete?.(results)
-      }, 100)
+      try {
+        await fetch("/api/photos/revalidate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ category }),
+        })
 
-      setTimeout(() => {
-        setIsExpanded(false)
-        setUploadQueue((prev) => prev.filter((p) => p.status !== "completed"))
-      }, 3000)
+        setTimeout(() => {
+          onUploadComplete?.(results)
+        }, 100)
+      } catch (error) {
+        console.error("Cache revalidation failed:", error)
+      }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "上传失败"
       onUploadError?.(errorMessage)
     } finally {
       setIsUploading(false)
+      setIsExpanded(false) // Close modal after upload
     }
   }
 
