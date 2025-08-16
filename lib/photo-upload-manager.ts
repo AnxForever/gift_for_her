@@ -35,6 +35,13 @@ class PhotoUploadManager {
     return PhotoUploadManager.instance
   }
 
+  private isMobile(): boolean {
+    return (
+      /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
+      window.innerWidth <= 768
+    )
+  }
+
   private async compressImage(
     file: File,
     maxWidth = 800,
@@ -46,60 +53,98 @@ class PhotoUploadManager {
       const ctx = canvas.getContext("2d")
       const img = new Image()
 
-      img.onload = () => {
-        onProgress?.(20)
+      const isMobile = this.isMobile()
+      const mobileMaxWidth = isMobile ? Math.min(maxWidth, 600) : maxWidth
+      const mobileQuality = isMobile ? Math.min(quality, 0.7) : quality
 
-        let { width, height } = img
+      console.log("[v0] Starting image compression", {
+        isMobile,
+        originalSize: file.size,
+        maxWidth: mobileMaxWidth,
+        quality: mobileQuality,
+      })
 
-        // Smart compression - skip if already small
-        if (width <= maxWidth && height <= maxWidth && file.size < 1024 * 1024) {
-          onProgress?.(100)
-          resolve(file)
-          return
-        }
+      img.onload = async () => {
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10))
+          onProgress?.(20)
 
-        // Calculate new dimensions maintaining aspect ratio
-        if (width > height) {
-          if (width > maxWidth) {
-            height = (height * maxWidth) / width
-            width = maxWidth
+          let { width, height } = img
+
+          if (isMobile && file.size < 2 * 1024 * 1024 && width <= mobileMaxWidth && height <= mobileMaxWidth) {
+            console.log("[v0] Skipping compression for small mobile image")
+            onProgress?.(100)
+            resolve(file)
+            return
           }
-        } else {
-          if (height > maxWidth) {
-            width = (width * maxWidth) / height
-            height = maxWidth
-          }
-        }
 
-        canvas.width = width
-        canvas.height = height
-
-        if (ctx) {
-          // Enhanced canvas settings for better quality
-          ctx.imageSmoothingEnabled = true
-          ctx.imageSmoothingQuality = "high"
-          ctx.fillStyle = "white"
-          ctx.fillRect(0, 0, width, height)
-          ctx.drawImage(img, 0, 0, width, height)
-        }
-
-        onProgress?.(60)
-
-        canvas.toBlob(
-          (blob) => {
-            if (blob) {
-              onProgress?.(100)
-              resolve(blob)
-            } else {
-              reject(new Error("Failed to compress image"))
+          if (width > height) {
+            if (width > mobileMaxWidth) {
+              height = (height * mobileMaxWidth) / width
+              width = mobileMaxWidth
             }
-          },
-          "image/jpeg",
-          quality,
-        )
+          } else {
+            if (height > mobileMaxWidth) {
+              width = (width * mobileMaxWidth) / height
+              height = mobileMaxWidth
+            }
+          }
+
+          console.log("[v0] Resizing image", {
+            originalWidth: img.width,
+            originalHeight: img.height,
+            newWidth: width,
+            newHeight: height,
+          })
+
+          canvas.width = width
+          canvas.height = height
+
+          if (ctx) {
+            ctx.imageSmoothingEnabled = true
+            ctx.imageSmoothingQuality = isMobile ? "medium" : "high"
+            ctx.fillStyle = "white"
+            ctx.fillRect(0, 0, width, height)
+
+            await new Promise((resolve) => setTimeout(resolve, 10))
+            onProgress?.(40)
+
+            ctx.drawImage(img, 0, 0, width, height)
+          }
+
+          await new Promise((resolve) => setTimeout(resolve, 10))
+          onProgress?.(60)
+
+          requestAnimationFrame(() => {
+            canvas.toBlob(
+              (blob) => {
+                if (blob) {
+                  console.log("[v0] Compression completed", {
+                    originalSize: file.size,
+                    compressedSize: blob.size,
+                    compressionRatio: (((file.size - blob.size) / file.size) * 100).toFixed(1) + "%",
+                  })
+                  onProgress?.(100)
+                  resolve(blob)
+                } else {
+                  reject(new Error("Failed to compress image"))
+                }
+              },
+              "image/jpeg",
+              mobileQuality,
+            )
+          })
+        } catch (error) {
+          console.error("[v0] Compression error:", error)
+          reject(error)
+        }
       }
 
-      img.onerror = () => reject(new Error("Failed to load image"))
+      img.onerror = () => {
+        console.error("[v0] Failed to load image for compression")
+        reject(new Error("Failed to load image"))
+      }
+
       img.src = URL.createObjectURL(file)
       onProgress?.(10)
     })
@@ -131,19 +176,76 @@ class PhotoUploadManager {
     return { valid: true }
   }
 
+  private async uploadWithProgress(
+    filePath: string,
+    blob: Blob,
+    onUploadProgress: (progress: number) => void,
+  ): Promise<string> {
+    return new Promise(async (resolve, reject) => {
+      try {
+        // Get upload URL and headers from Supabase
+        const { data: authData } = await supabase.auth.getUser()
+        if (!authData?.user) {
+          throw new Error("Not authenticated")
+        }
+
+        // Create form data for upload
+        const formData = new FormData()
+        formData.append("file", blob)
+
+        // Use XMLHttpRequest for progress tracking
+        const xhr = new XMLHttpRequest()
+
+        xhr.upload.addEventListener("progress", (event) => {
+          if (event.lengthComputable) {
+            const progress = (event.loaded / event.total) * 100
+            console.log("[v0] Upload progress:", progress + "%")
+            onUploadProgress(progress)
+          }
+        })
+
+        xhr.addEventListener("load", () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            resolve(filePath)
+          } else {
+            reject(new Error(`Upload failed with status: ${xhr.status}`))
+          }
+        })
+
+        xhr.addEventListener("error", () => {
+          reject(new Error("Upload failed"))
+        })
+
+        // Get Supabase storage URL and auth headers
+        const {
+          data: { session },
+        } = await supabase.auth.getSession()
+        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+        const uploadUrl = `${supabaseUrl}/storage/v1/object/photos/${filePath}`
+
+        xhr.open("POST", uploadUrl)
+        xhr.setRequestHeader("Authorization", `Bearer ${session?.access_token}`)
+        xhr.setRequestHeader("apikey", process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!)
+
+        xhr.send(formData)
+      } catch (error) {
+        reject(error)
+      }
+    })
+  }
+
   async uploadSingleFile(file: File, options: UploadOptions): Promise<{ url: string; storagePath: string }> {
     const uploadId = `upload_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
 
-    // Validate file
+    console.log("[v0] Starting upload for file:", file.name, "Size:", file.size)
+
     const validation = this.validateFile(file)
     if (!validation.valid) {
       throw new Error(validation.error)
     }
 
-    // Generate preview
     const preview = await this.generatePreview(file)
 
-    // Create upload progress entry
     const uploadProgress: UploadProgress = {
       id: uploadId,
       file,
@@ -156,7 +258,6 @@ class PhotoUploadManager {
     options.onProgress?.(uploadProgress)
 
     try {
-      // Check authentication
       const { data: authData, error: authError } = await supabase.auth.getUser()
       if (authError || !authData?.user) {
         throw new Error("请先登录后再上传照片")
@@ -164,30 +265,40 @@ class PhotoUploadManager {
 
       const user = authData.user
 
-      // Update status to uploading
       uploadProgress.status = "uploading"
       uploadProgress.progress = 10
       this.uploadQueue.set(uploadId, uploadProgress)
       options.onProgress?.(uploadProgress)
 
-      // Compress image with progress tracking
+      console.log("[v0] Starting compression...")
+
+      const isMobile = this.isMobile()
+      const compressionMaxWidth = isMobile ? 600 : options.maxWidth || 800
+      const compressionQuality = isMobile ? 0.7 : options.quality || 0.8
+
       const compressedBlob = await this.compressImage(
         file,
-        options.maxWidth || 800,
-        options.quality || 0.8,
+        compressionMaxWidth,
+        compressionQuality,
         (compressionProgress) => {
-          uploadProgress.progress = 10 + compressionProgress * 0.3 // 10-40%
+          const overallProgress = 10 + compressionProgress * 0.3 // 10-40%
+          uploadProgress.progress = overallProgress
           this.uploadQueue.set(uploadId, uploadProgress)
-          options.onProgress?.(uploadProgress)
+          console.log("[v0] Compression progress:", compressionProgress + "%", "Overall:", overallProgress + "%")
+
+          requestAnimationFrame(() => {
+            options.onProgress?.(uploadProgress)
+          })
         },
       )
+
+      console.log("[v0] Compression completed, starting upload...")
 
       uploadProgress.progress = 40
       uploadProgress.status = "processing"
       this.uploadQueue.set(uploadId, uploadProgress)
       options.onProgress?.(uploadProgress)
 
-      // Generate unique filename
       const timestamp = Date.now()
       const randomStr = Math.random().toString(36).substring(2, 8)
       const fileExtension = file.name.split(".").pop() || "jpg"
@@ -198,31 +309,46 @@ class PhotoUploadManager {
       this.uploadQueue.set(uploadId, uploadProgress)
       options.onProgress?.(uploadProgress)
 
-      // Upload to Supabase Storage
-      const { data: uploadData, error: uploadError } = await supabase.storage
-        .from("photos")
-        .upload(filePath, compressedBlob, {
-          contentType: compressedBlob.type || "image/jpeg",
-          upsert: false,
-        })
+      console.log("[v0] Uploading to storage:", filePath)
 
-      if (uploadError) {
-        throw new Error(`上传失败: ${uploadError.message}`)
+      try {
+        await this.uploadWithProgress(filePath, compressedBlob, (progressPercent) => {
+          const overallProgress = 50 + progressPercent * 0.3 // 50-80%
+          uploadProgress.progress = overallProgress
+          this.uploadQueue.set(uploadId, uploadProgress)
+          console.log("[v0] Upload progress:", progressPercent + "%", "Overall:", overallProgress + "%")
+
+          requestAnimationFrame(() => {
+            options.onProgress?.(uploadProgress)
+          })
+        })
+      } catch (error) {
+        // Fallback to Supabase client if XMLHttpRequest fails
+        console.log("[v0] XMLHttpRequest failed, falling back to Supabase client")
+        const { data: uploadData, error: uploadError } = await supabase.storage
+          .from("photos")
+          .upload(filePath, compressedBlob, {
+            contentType: compressedBlob.type || "image/jpeg",
+            upsert: false,
+          })
+
+        if (uploadError) {
+          console.error("[v0] Upload error:", uploadError)
+          throw new Error(`上传失败: ${uploadError.message}`)
+        }
       }
 
       uploadProgress.progress = 80
       this.uploadQueue.set(uploadId, uploadProgress)
       options.onProgress?.(uploadProgress)
 
-      // Get public URL
-      const { data: urlData } = supabase.storage.from("photos").getPublicUrl(uploadData.path)
+      const { data: urlData } = supabase.storage.from("photos").getPublicUrl(filePath)
 
       const result = {
         url: urlData.publicUrl,
-        storagePath: uploadData.path,
+        storagePath: filePath,
       }
 
-      // Mark as completed
       uploadProgress.status = "completed"
       uploadProgress.progress = 100
       uploadProgress.result = result
@@ -230,7 +356,8 @@ class PhotoUploadManager {
       options.onProgress?.(uploadProgress)
       options.onComplete?.(result)
 
-      // Clean up after delay
+      console.log("[v0] Upload completed successfully")
+
       setTimeout(() => {
         this.uploadQueue.delete(uploadId)
       }, 5000)
@@ -238,6 +365,7 @@ class PhotoUploadManager {
       return result
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "上传失败"
+      console.error("[v0] Upload failed:", errorMessage)
       uploadProgress.status = "error"
       uploadProgress.error = errorMessage
       this.uploadQueue.set(uploadId, uploadProgress)
@@ -251,7 +379,6 @@ class PhotoUploadManager {
     const results: { url: string; storagePath: string }[] = []
     const errors: string[] = []
 
-    // Process files in batches to avoid overwhelming the system
     for (let i = 0; i < files.length; i += this.maxConcurrentUploads) {
       const batch = files.slice(i, i + this.maxConcurrentUploads)
 
@@ -260,7 +387,6 @@ class PhotoUploadManager {
           const result = await this.uploadSingleFile(file, {
             ...options,
             onProgress: (progress) => {
-              // Aggregate progress for batch
               const overallProgress = {
                 ...progress,
                 progress: ((i + batch.indexOf(file)) / files.length) * 100 + progress.progress / files.length,
@@ -277,7 +403,6 @@ class PhotoUploadManager {
         }
       })
 
-      // Wait for current batch to complete before starting next
       await Promise.allSettled(batchPromises)
     }
 

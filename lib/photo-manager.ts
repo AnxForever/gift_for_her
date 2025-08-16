@@ -413,6 +413,8 @@ class PhotoManager {
   }
 
   async deletePhoto(id: string): Promise<boolean> {
+    console.log("[v0] Starting delete operation for photo ID:", id)
+
     const {
       data: { user },
       error: authError,
@@ -425,34 +427,49 @@ class PhotoManager {
     try {
       const { data: photo, error: fetchError } = await supabase
         .from("photos")
-        .select("storage_path, image_url")
+        .select("storage_path")
         .eq("id", id)
         .eq("user_id", user.id)
         .single()
 
       if (fetchError) {
-        console.error("Error fetching photo for deletion:", fetchError)
+        console.error("[v0] Error fetching photo for deletion:", fetchError)
         throw new Error("找不到要删除的照片")
       }
+
+      console.log("[v0] Found photo with storage path:", photo?.storage_path)
 
       const { error: deleteError } = await supabase.from("photos").delete().eq("id", id).eq("user_id", user.id)
 
       if (deleteError) {
-        console.error("Error deleting photo from database:", deleteError)
+        console.error("[v0] Error deleting photo from database:", deleteError)
         throw new Error("删除照片记录失败")
       }
 
-      if (photo?.storage_path) {
-        const { error: storageError } = await supabase.storage.from("photos").remove([photo.storage_path])
+      console.log("[v0] Successfully deleted photo from database")
 
-        if (storageError) {
-          console.error("Error deleting from storage:", storageError)
+      if (photo?.storage_path) {
+        try {
+          const { error: storageError } = await supabase.storage.from("photos").remove([photo.storage_path])
+
+          if (storageError) {
+            console.error("[v0] Error deleting from storage:", storageError)
+            // Don't throw here - database deletion succeeded, storage cleanup failed
+          } else {
+            console.log("[v0] Successfully deleted from storage")
+          }
+        } catch (storageErr) {
+          console.error("[v0] Storage deletion failed:", storageErr)
+          // Continue - database deletion succeeded
         }
       }
 
+      this.photoCache.delete("all-photos")
+      this.photoCache.delete("category-festival")
+
       return true
     } catch (error) {
-      console.error("Delete operation failed:", error)
+      console.error("[v0] Delete operation failed:", error)
       throw error
     }
   }

@@ -5,7 +5,7 @@ import { PhotoManager } from "@/lib/photo-manager"
 import EnhancedPhotoUpload from "./enhanced-photo-upload"
 
 interface FestivalPhoto {
-  id: number
+  id: string
   src: string
   festival: string
   date: string
@@ -22,7 +22,7 @@ export default function FestivalCardGallery({ initialPhotos }: FestivalCardGalle
   const [mounted, setMounted] = useState(false)
   const [festivalPhotos, setFestivalPhotos] = useState<FestivalPhoto[]>([])
   const [isEditMode, setIsEditMode] = useState(false)
-  const [editingPhoto, setEditingPhoto] = useState<number | null>(null)
+  const [editingPhoto, setEditingPhoto] = useState<string | null>(null)
   const [isUploading, setIsUploading] = useState(false)
   const [editForm, setEditForm] = useState({
     title: "",
@@ -92,11 +92,16 @@ export default function FestivalCardGallery({ initialPhotos }: FestivalCardGalle
     }
   }
 
-  const handleDeletePhoto = (photoId: number) => {
+  const handleDeletePhoto = async (photoId: string) => {
     if (confirm("Are you sure you want to delete this photo?")) {
-      const photoManager = PhotoManager.getInstance()
-      photoManager.deletePhoto(photoId)
-      loadPhotos()
+      try {
+        const photoManager = PhotoManager.getInstance()
+        await photoManager.deletePhoto(photoId)
+        await loadPhotos()
+      } catch (error) {
+        console.error("Failed to delete photo:", error)
+        alert("Failed to delete photo. Please try again.")
+      }
     }
   }
 
