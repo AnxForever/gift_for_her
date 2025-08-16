@@ -1,9 +1,8 @@
 "use client"
-
-import type React from "react"
 import { useState, useEffect } from "react"
 import { Camera, Edit3, Plus, X, Heart } from "lucide-react"
 import { PhotoManager } from "@/lib/photo-manager"
+import EnhancedPhotoUpload from "./enhanced-photo-upload"
 
 interface FestivalPhoto {
   id: number
@@ -24,6 +23,7 @@ export default function FestivalCardGallery({ initialPhotos }: FestivalCardGalle
   const [festivalPhotos, setFestivalPhotos] = useState<FestivalPhoto[]>([])
   const [isEditMode, setIsEditMode] = useState(false)
   const [editingPhoto, setEditingPhoto] = useState<number | null>(null)
+  const [isUploading, setIsUploading] = useState(false)
   const [editForm, setEditForm] = useState({
     title: "",
     description: "",
@@ -67,14 +67,14 @@ export default function FestivalCardGallery({ initialPhotos }: FestivalCardGalle
     setFestivalPhotos(formattedPhotos)
   }
 
-  const handlePhotoUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0]
-    if (file) {
-      const reader = new FileReader()
-      reader.onload = (e) => {
-        const photoManager = PhotoManager.getInstance()
+  const handlePhotoUpload = async (files: File[]) => {
+    setIsUploading(true)
+    try {
+      const photoManager = PhotoManager.getInstance()
+
+      for (const file of files) {
         const newPhoto = {
-          src: e.target?.result as string,
+          src: URL.createObjectURL(file),
           caption: "New festival celebration",
           category: "festival" as const,
           title: "New Celebration",
@@ -83,10 +83,12 @@ export default function FestivalCardGallery({ initialPhotos }: FestivalCardGalle
           date: new Date().toISOString().split("T")[0],
           memories: ["Beautiful moments", "Sweet memories"],
         }
-        photoManager.addPhoto(newPhoto)
-        loadPhotos()
+        await photoManager.addPhoto(newPhoto)
       }
-      reader.readAsDataURL(file)
+
+      await loadPhotos()
+    } finally {
+      setIsUploading(false)
     }
   }
 
@@ -159,11 +161,14 @@ export default function FestivalCardGallery({ initialPhotos }: FestivalCardGalle
           <Camera className="w-16 h-16 text-amber-700 mx-auto mb-4" />
           <h2 className="font-serif text-2xl md:text-3xl font-bold text-amber-900 mb-2">No Festival Photos Yet</h2>
           <p className="font-sans text-amber-700 mb-6">Start your vintage photo collection!</p>
-          <label className="px-6 py-3 bg-amber-800 text-cream rounded-lg font-sans font-medium hover:bg-amber-900 transition-colors cursor-pointer shadow-lg">
-            <Plus className="w-5 h-5 inline mr-2" />
-            Add First Photo
-            <input type="file" accept="image/*" onChange={handlePhotoUpload} className="hidden" />
-          </label>
+          <EnhancedPhotoUpload
+            onUpload={handlePhotoUpload}
+            category="festival"
+            className="inline-block"
+            buttonClassName="px-6 py-3 bg-amber-800 text-cream rounded-lg font-sans font-medium hover:bg-amber-900 transition-colors shadow-lg"
+            buttonText="Add First Photo"
+            icon={<Plus className="w-5 h-5 inline mr-2" />}
+          />
         </div>
       </div>
     )
@@ -191,11 +196,15 @@ export default function FestivalCardGallery({ initialPhotos }: FestivalCardGalle
         </p>
 
         <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-          <label className="px-6 py-3 bg-green-700 text-cream rounded-lg font-sans font-medium hover:bg-green-800 transition-all duration-300 cursor-pointer shadow-md">
-            <Plus className="w-5 h-5 inline mr-2" />
-            Add Photo
-            <input type="file" accept="image/*" onChange={handlePhotoUpload} className="hidden" />
-          </label>
+          <EnhancedPhotoUpload
+            onUpload={handlePhotoUpload}
+            category="festival"
+            className="inline-block"
+            buttonClassName="px-6 py-3 bg-green-700 text-cream rounded-lg font-sans font-medium hover:bg-green-800 transition-all duration-300 shadow-md"
+            buttonText="Add Photo"
+            icon={<Plus className="w-5 h-5 inline mr-2" />}
+            disabled={isUploading}
+          />
 
           <button
             onClick={() => setIsEditMode(!isEditMode)}
@@ -204,12 +213,22 @@ export default function FestivalCardGallery({ initialPhotos }: FestivalCardGalle
                 ? "bg-amber-800 text-cream hover:bg-amber-900"
                 : "bg-cream text-amber-800 border-2 border-amber-300 hover:bg-amber-50"
             }`}
+            disabled={isUploading}
           >
             <Edit3 className="w-5 h-5 inline mr-2" />
             {isEditMode ? "Done Editing" : "Edit Photos"}
           </button>
         </div>
       </div>
+
+      {isUploading && (
+        <div className="fixed top-4 right-4 bg-amber-800 text-cream px-4 py-2 rounded-lg shadow-lg z-50">
+          <div className="flex items-center gap-2">
+            <div className="animate-spin rounded-full h-4 w-4 border-2 border-cream border-t-transparent"></div>
+            <span className="font-sans text-sm">Uploading photos...</span>
+          </div>
+        </div>
+      )}
 
       <div className="max-w-7xl mx-auto">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 md:gap-12 lg:gap-16">
