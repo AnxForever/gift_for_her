@@ -13,6 +13,8 @@ interface OptimizedImageProps {
   height?: number
   priority?: boolean
   style?: React.CSSProperties
+  sizes?: string
+  fill?: boolean
 }
 
 export default function OptimizedImage({
@@ -23,6 +25,8 @@ export default function OptimizedImage({
   height = 300,
   priority = false,
   style,
+  sizes = "(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw",
+  fill = false,
 }: OptimizedImageProps) {
   const [isLoading, setIsLoading] = useState(true)
   const [hasError, setHasError] = useState(false)
@@ -46,8 +50,7 @@ export default function OptimizedImage({
         <Image
           src={src || "/placeholder.svg"}
           alt={alt}
-          width={width}
-          height={height}
+          {...(fill ? { fill: true } : { width, height })}
           priority={priority}
           className={`transition-opacity duration-300 ${isLoading ? "opacity-0" : "opacity-100"}`}
           style={{ objectFit: "cover", ...style }}
@@ -56,7 +59,10 @@ export default function OptimizedImage({
             setHasError(true)
             setIsLoading(false)
           }}
-          sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
+          sizes={sizes}
+          quality={85}
+          placeholder="blur"
+          blurDataURL="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAAIAAoDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAv/xAAhEAACAQMDBQAAAAAAAAAAAAABAgMABAUGIWGRkqGx0f/EABUBAQEAAAAAAAAAAAAAAAAAAAMF/8QAGhEAAgIDAAAAAAAAAAAAAAAAAAECEgMRkf/aAAwDAQACEQMRAD8AltJagyeH0AthI5xdrLcNM91BF5pX2HaH9bcfaSXWGaRmknyJckliyjqTzSlT54b6bk+h0R//2Q=="
         />
       )}
     </div>

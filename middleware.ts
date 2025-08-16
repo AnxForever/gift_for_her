@@ -1,7 +1,38 @@
 import { createServerClient } from "@supabase/ssr"
 import { NextResponse, type NextRequest } from "next/server"
 
+const rateLimitMap = new Map<string, { count: number; lastReset: number }>()
+
+function rateLimit(ip: string, limit = 10, windowMs = 60000): boolean {
+  const now = Date.now()
+  const windowStart = now - windowMs
+
+  const record = rateLimitMap.get(ip)
+
+  if (!record || record.lastReset < windowStart) {
+    rateLimitMap.set(ip, { count: 1, lastReset: now })
+    return true
+  }
+
+  if (record.count >= limit) {
+    return false
+  }
+
+  record.count++
+  return true
+}
+
 export async function middleware(request: NextRequest) {
+  const pathname = request.nextUrl.pathname
+  if (pathname.startsWith("/api/upload") || pathname.startsWith("/api/photos")) {
+    const ip = request.ip || request.headers.get("x-forwarded-for") || "anonymous"
+
+    if (!rateLimit(ip, 20, 60000)) {
+      // 20 requests per minute
+      return new NextResponse("Too Many Requests", { status: 429 })
+    }
+  }
+
   let supabaseResponse = NextResponse.next({
     request,
   })
