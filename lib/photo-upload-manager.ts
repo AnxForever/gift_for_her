@@ -35,6 +35,13 @@ class PhotoUploadManager {
     return PhotoUploadManager.instance
   }
 
+  private isProduction(): boolean {
+    return (
+      process.env.NODE_ENV === "production" ||
+      (typeof window !== "undefined" && window.location.hostname !== "localhost")
+    )
+  }
+
   private isMobile(): boolean {
     return (
       /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
@@ -54,11 +61,13 @@ class PhotoUploadManager {
       const img = new Image()
 
       const isMobile = this.isMobile()
+      const isProduction = this.isProduction()
       const mobileMaxWidth = isMobile ? Math.min(maxWidth, 600) : maxWidth
       const mobileQuality = isMobile ? Math.min(quality, 0.7) : quality
 
       console.log("[v0] Starting image compression", {
         isMobile,
+        isProduction,
         originalSize: file.size,
         maxWidth: mobileMaxWidth,
         quality: mobileQuality,
@@ -66,7 +75,8 @@ class PhotoUploadManager {
 
       img.onload = async () => {
         try {
-          await new Promise((resolve) => setTimeout(resolve, 10))
+          const delay = isProduction ? 50 : 10
+          await new Promise((resolve) => setTimeout(resolve, delay))
           onProgress?.(20)
 
           let { width, height } = img
@@ -106,13 +116,13 @@ class PhotoUploadManager {
             ctx.fillStyle = "white"
             ctx.fillRect(0, 0, width, height)
 
-            await new Promise((resolve) => setTimeout(resolve, 10))
+            await new Promise((resolve) => setTimeout(resolve, delay))
             onProgress?.(40)
 
             ctx.drawImage(img, 0, 0, width, height)
           }
 
-          await new Promise((resolve) => setTimeout(resolve, 10))
+          await new Promise((resolve) => setTimeout(resolve, delay))
           onProgress?.(60)
 
           requestAnimationFrame(() => {
@@ -183,55 +193,60 @@ class PhotoUploadManager {
   ): Promise<string> {
     return new Promise(async (resolve, reject) => {
       try {
-        // Get upload URL and headers from Supabase
-        const { data: authData } = await supabase.auth.getUser()
-        if (!authData?.user) {
-          throw new Error("Not authenticated")
+        console.log("[v0] Starting Supabase upload with progress simulation")
+
+        const isProduction = this.isProduction()
+
+        let simulatedProgress = 0
+        const progressInterval = setInterval(
+          () => {
+            simulatedProgress += Math.random() * (isProduction ? 10 : 15)
+            if (simulatedProgress > 90) {
+              simulatedProgress = 90
+            }
+            onUploadProgress(simulatedProgress)
+          },
+          isProduction ? 300 : 200,
+        )
+
+        const { data: uploadData, error: uploadError } = await supabase.storage.from("photos").upload(filePath, blob, {
+          contentType: blob.type || "image/jpeg",
+          upsert: false,
+        })
+
+        clearInterval(progressInterval)
+        onUploadProgress(100)
+
+        if (uploadError) {
+          console.error("[v0] Upload error:", uploadError)
+          throw new Error(`上传失败: ${uploadError.message}`)
         }
 
-        // Create form data for upload
-        const formData = new FormData()
-        formData.append("file", blob)
-
-        // Use XMLHttpRequest for progress tracking
-        const xhr = new XMLHttpRequest()
-
-        xhr.upload.addEventListener("progress", (event) => {
-          if (event.lengthComputable) {
-            const progress = (event.loaded / event.total) * 100
-            console.log("[v0] Upload progress:", progress + "%")
-            onUploadProgress(progress)
-          }
-        })
-
-        xhr.addEventListener("load", () => {
-          if (xhr.status >= 200 && xhr.status < 300) {
-            resolve(filePath)
-          } else {
-            reject(new Error(`Upload failed with status: ${xhr.status}`))
-          }
-        })
-
-        xhr.addEventListener("error", () => {
-          reject(new Error("Upload failed"))
-        })
-
-        // Get Supabase storage URL and auth headers
-        const {
-          data: { session },
-        } = await supabase.auth.getSession()
-        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-        const uploadUrl = `${supabaseUrl}/storage/v1/object/photos/${filePath}`
-
-        xhr.open("POST", uploadUrl)
-        xhr.setRequestHeader("Authorization", `Bearer ${session?.access_token}`)
-        xhr.setRequestHeader("apikey", process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!)
-
-        xhr.send(formData)
+        resolve(filePath)
       } catch (error) {
         reject(error)
       }
     })
+  }
+
+  private async revalidateCache(category: string): Promise<void> {
+    try {
+      const response = await fetch("/api/photos/revalidate", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ category }),
+      })
+
+      if (!response.ok) {
+        console.warn("[v0] Cache revalidation failed:", response.statusText)
+      } else {
+        console.log("[v0] Cache revalidated successfully")
+      }
+    } catch (error) {
+      console.warn("[v0] Cache revalidation error:", error)
+    }
   }
 
   async uploadSingleFile(file: File, options: UploadOptions): Promise<{ url: string; storagePath: string }> {
@@ -311,38 +326,54 @@ class PhotoUploadManager {
 
       console.log("[v0] Uploading to storage:", filePath)
 
-      try {
-        await this.uploadWithProgress(filePath, compressedBlob, (progressPercent) => {
-          const overallProgress = 50 + progressPercent * 0.3 // 50-80%
-          uploadProgress.progress = overallProgress
-          this.uploadQueue.set(uploadId, uploadProgress)
-          console.log("[v0] Upload progress:", progressPercent + "%", "Overall:", overallProgress + "%")
+      await this.uploadWithProgress(filePath, compressedBlob, (progressPercent) => {
+        const overallProgress = 50 + progressPercent * 0.3 // 50-80%
+        uploadProgress.progress = overallProgress
+        this.uploadQueue.set(uploadId, uploadProgress)
+        console.log("[v0] Upload progress:", progressPercent + "%", "Overall:", overallProgress + "%")
 
-          requestAnimationFrame(() => {
-            options.onProgress?.(uploadProgress)
-          })
+        requestAnimationFrame(() => {
+          options.onProgress?.(uploadProgress)
         })
-      } catch (error) {
-        // Fallback to Supabase client if XMLHttpRequest fails
-        console.log("[v0] XMLHttpRequest failed, falling back to Supabase client")
-        const { data: uploadData, error: uploadError } = await supabase.storage
-          .from("photos")
-          .upload(filePath, compressedBlob, {
-            contentType: compressedBlob.type || "image/jpeg",
-            upsert: false,
-          })
-
-        if (uploadError) {
-          console.error("[v0] Upload error:", uploadError)
-          throw new Error(`上传失败: ${uploadError.message}`)
-        }
-      }
+      })
 
       uploadProgress.progress = 80
       this.uploadQueue.set(uploadId, uploadProgress)
       options.onProgress?.(uploadProgress)
 
+      console.log("[v0] Saving photo metadata to database...")
+
       const { data: urlData } = supabase.storage.from("photos").getPublicUrl(filePath)
+
+      const photoData = {
+        user_id: user.id,
+        category: options.category,
+        title: file.name.split(".")[0],
+        description: "",
+        image_url: urlData.publicUrl,
+        storage_path: filePath,
+        tags: [],
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }
+
+      const { data: dbData, error: dbError } = await supabase.from("photos").insert([photoData]).select().single()
+
+      if (dbError) {
+        console.error("[v0] Database save error:", dbError)
+        // Clean up uploaded file from storage
+        try {
+          await supabase.storage.from("photos").remove([filePath])
+          console.log("[v0] Cleaned up uploaded file from storage due to database error")
+        } catch (cleanupError) {
+          console.error("[v0] Failed to cleanup uploaded file:", cleanupError)
+        }
+        throw new Error(`保存照片信息失败: ${dbError.message}`)
+      }
+
+      console.log("[v0] Photo metadata saved to database:", dbData)
+
+      await this.revalidateCache(options.category)
 
       const result = {
         url: urlData.publicUrl,
